@@ -1,11 +1,7 @@
 name: Riepilogo mattutino
 
 on:
-  schedule:
-    # GitHub usa l'orario UTC: 05:30 UTC = 07:30 in Italia (ora legale).
-    # In inverno (ora solare) diventa 06:30 italiane; se vuoi mantenere
-    # le 07:30 esatte, a ottobre cambia in "30 6 * * *".
-    - cron: "30 5 * * *"
+ 
   workflow_dispatch: {}   # permette di lanciarlo a mano dal tab Actions per testare
 
 jobs:
