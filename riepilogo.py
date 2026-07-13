@@ -17,6 +17,7 @@ Variabili d'ambiente richieste (GitHub Secrets):
   ANTHROPIC_API_KEY    chiave API da console.anthropic.com
 """
 
+import html
 import os
 import sys
 from datetime import date, datetime, timedelta
@@ -200,18 +201,18 @@ def riepilogo_con_claude(impegni: list[dict], oggi: date,
         dati.append("Nessun impegno nei prossimi 7 giorni.")
 
     system = (
-        "Sei l'assistente personale mattutino di Leo. Ogni mattina ricevi i suoi "
-        "impegni, il meteo e il bilancio di ieri, e scrivi il messaggio di "
-        "buongiorno che riceve su Telegram.\n"
-        "Stile: italiano, caldo ma asciutto, come un amico sveglio. Massimo 120 "
-        "parole. Struttura libera, niente elenchi puntati rigidi.\n"
-        "Contenuto: apri con un buongiorno legato al giorno o al meteo; di' cosa "
-        "c'è oggi (se c'è un orario, citalo); segnala solo le cose davvero "
-        "rilevanti dei prossimi giorni, in particolare le priorità alte; se ieri "
-        "ha completato dei task, riconosciglielo in una frase, senza esagerare.\n"
-        "Se non c'è nessun impegno oggi, dillo con leggerezza.\n"
-        "Puoi usare 2-3 emoji al massimo. Non inventare impegni o dettagli non "
-        "presenti nei dati. Non firmarti e non fare domande."
+        "Sei l'assistente personale mattutino di Leo. Scrivi SOLO l'apertura del "
+        "suo messaggio di buongiorno su Telegram: subito sotto il tuo testo verrà "
+        "aggiunto automaticamente l'elenco completo degli impegni, quindi NON "
+        "elencare gli impegni uno per uno.\n"
+        "Stile: italiano, caldo ma asciutto, come un amico sveglio. Massimo 50 "
+        "parole, 2-3 frasi.\n"
+        "Contenuto: un buongiorno legato al giorno o al meteo; poi UNA sola "
+        "osservazione utile — la cosa più importante di oggi, una priorità alta "
+        "in arrivo, una nota da ricordare, o il bilancio di ieri se positivo. "
+        "Scegli tu quella che merita di più, non tutte.\n"
+        "Massimo 2 emoji. Non inventare dettagli non presenti nei dati. Non "
+        "firmarti e non fare domande."
     )
 
     try:
@@ -242,17 +243,11 @@ def riepilogo_con_claude(impegni: list[dict], oggi: date,
         return None
 
 
-# ------------------- fallback: il vecchio elenco formattato ------------------
+# --------------------- elenco impegni (generato dal codice) ------------------
 
-def riepilogo_classico(impegni: list[dict], oggi: date,
-                       meteo: str | None, ieri: tuple[int, int]) -> str:
+def lista_impegni(impegni: list[dict], oggi: date) -> str:
+    """Solo la parte a elenco: Oggi / Domani / Prossimi giorni."""
     domani = oggi + timedelta(days=1)
-    testo = [f"📅 <b>{GIORNI[oggi.weekday()]} {oggi.day} {MESI[oggi.month-1]}</b>"]
-    if meteo:
-        testo.append(f"🌤 Bertinoro: {meteo}")
-    fatti, totali = ieri
-    if totali:
-        testo.append(f"Ieri: {fatti}/{totali} impegni completati 💪")
 
     def riga(i, con_giorno=False):
         pezzi = [PRIORITA_EMOJI.get(i["priorita"], "▫️")]
@@ -267,7 +262,7 @@ def riepilogo_classico(impegni: list[dict], oggi: date,
     di_domani = [i for i in impegni if i["giorno"] == domani]
     prossimi = [i for i in impegni if i["giorno"] and i["giorno"] > domani]
 
-    testo.append("\n<b>Oggi</b>")
+    testo = ["<b>Oggi</b>"]
     testo += [riga(i) for i in di_oggi] if di_oggi else ["Nessun impegno 👌"]
     if di_domani:
         testo.append("\n<b>Domani</b>")
@@ -275,6 +270,21 @@ def riepilogo_classico(impegni: list[dict], oggi: date,
     if prossimi:
         testo.append("\n<b>Prossimi giorni</b>")
         testo += [riga(i, con_giorno=True) for i in prossimi]
+    return "\n".join(testo)
+
+
+# ------------------- fallback: il vecchio formato completo -------------------
+
+def riepilogo_classico(impegni: list[dict], oggi: date,
+                       meteo: str | None, ieri: tuple[int, int]) -> str:
+    testo = [f"📅 <b>{GIORNI[oggi.weekday()]} {oggi.day} {MESI[oggi.month-1]}</b>"]
+    if meteo:
+        testo.append(f"🌤 Bertinoro: {meteo}")
+    fatti, totali = ieri
+    if totali:
+        testo.append(f"Ieri: {fatti}/{totali} impegni completati 💪")
+    testo.append("")
+    testo.append(lista_impegni(impegni, oggi))
     return "\n".join(testo)
 
 
@@ -295,10 +305,16 @@ def main() -> None:
     ieri = bilancio_ieri(oggi)
     meteo = meteo_bertinoro()
 
-    testo = riepilogo_con_claude(impegni, oggi, meteo, ieri)
-    if testo:
-        invia_telegram(testo, html=False)
-        print(f"Inviato riepilogo Claude ({len(impegni)} impegni)")
+    apertura = riepilogo_con_claude(impegni, oggi, meteo, ieri)
+    if apertura:
+        # Apertura discorsiva di Claude + elenco preciso generato dal codice.
+        # Il testo di Claude va "escapato" perche' il messaggio usa parse_mode
+        # HTML per il grassetto dell'elenco.
+        testo = (f"📅 <b>{GIORNI[oggi.weekday()]} {oggi.day} {MESI[oggi.month-1]}</b>\n"
+                 f"{html.escape(apertura)}\n\n"
+                 f"{lista_impegni(impegni, oggi)}")
+        invia_telegram(testo, html=True)
+        print(f"Inviato riepilogo combinato ({len(impegni)} impegni)")
     else:
         invia_telegram(riepilogo_classico(impegni, oggi, meteo, ieri), html=True)
         print(f"Inviato riepilogo classico ({len(impegni)} impegni)")
