@@ -1,8 +1,9 @@
 name: Riepilogo mattutino
 
 on:
- 
-  workflow_dispatch: {}   # permette di lanciarlo a mano dal tab Actions per testare
+  # Nessun blocco "schedule": il trigger arriva da cron-job.org,
+  # che chiama l'endpoint workflow_dispatch dell'API GitHub alle 7:30.
+  workflow_dispatch: {}
 
 jobs:
   riepilogo:
@@ -21,4 +22,5 @@ jobs:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python riepilogo.py
