@@ -106,6 +106,25 @@ def bilancio_ieri(oggi: date) -> tuple[int, int]:
     return fatti, totali
 
 
+def impegni_arretrati(oggi: date, max_giorni: int = 30) -> list[dict]:
+    """Impegni NON fatti con data passata (fino a max_giorni indietro).
+
+    Il limite evita che, dopo mesi di uso, un vecchio task dimenticato
+    resti in cima al messaggio per sempre: oltre i 30 giorni si presume
+    che non sia piu' rilevante (resta comunque nel database).
+    """
+    inizio = oggi - timedelta(days=max_giorni)
+    filtro = {"and": [
+        {"property": "Fatto", "checkbox": {"equals": False}},
+        {"property": "Data", "date": {"on_or_after": inizio.isoformat()}},
+        {"property": "Data", "date": {"before": oggi.isoformat()}},
+    ]}
+    arretrati = [estrai(p) for p in query_notion(filtro)]
+    for a in arretrati:
+        a["ritardo"] = (oggi - a["giorno"]).days if a["giorno"] else None
+    return arretrati
+
+
 def estrai(pagina: dict) -> dict:
     """Estrae i campi utili da una pagina Notion."""
     p = pagina["properties"]
@@ -182,7 +201,7 @@ def descrivi_impegno(i: dict, oggi: date) -> str:
     return " ".join(pezzi)
 
 
-def riepilogo_con_claude(impegni: list[dict], oggi: date,
+def riepilogo_con_claude(impegni: list[dict], arretrati: list[dict], oggi: date,
                          meteo: str | None, ieri: tuple[int, int]) -> str | None:
     """Chiede a Claude un buongiorno discorsivo. None se qualcosa va storto."""
     if not ANTHROPIC_API_KEY:
@@ -194,6 +213,11 @@ def riepilogo_con_claude(impegni: list[dict], oggi: date,
     fatti, totali = ieri
     if totali:
         dati.append(f"Bilancio di ieri: completati {fatti} impegni su {totali}")
+    if arretrati:
+        dati.append("Impegni ARRETRATI (scaduti e mai completati):")
+        dati += [f"- {a['titolo']}: in ritardo di "
+                 f"{a['ritardo']} giorn{'o' if a['ritardo'] == 1 else 'i'}"
+                 for a in arretrati]
     if impegni:
         dati.append("Impegni dei prossimi 7 giorni:")
         dati += [descrivi_impegno(i, oggi) for i in impegni]
@@ -208,9 +232,11 @@ def riepilogo_con_claude(impegni: list[dict], oggi: date,
         "Stile: italiano, caldo ma asciutto, come un amico sveglio. Massimo 50 "
         "parole, 2-3 frasi.\n"
         "Contenuto: un buongiorno legato al giorno o al meteo; poi UNA sola "
-        "osservazione utile — la cosa più importante di oggi, una priorità alta "
-        "in arrivo, una nota da ricordare, o il bilancio di ieri se positivo. "
-        "Scegli tu quella che merita di più, non tutte.\n"
+        "osservazione utile — la cosa più importante di oggi, un arretrato che "
+        "si trascina da giorni, una priorità alta in arrivo, una nota da "
+        "ricordare, o il bilancio di ieri se positivo. Scegli tu quella che "
+        "merita di più, non tutte. Se citi un arretrato, fallo come promemoria "
+        "pratico, senza colpevolizzare.\n"
         "Massimo 2 emoji. Non inventare dettagli non presenti nei dati. Non "
         "firmarti e non fare domande."
     )
@@ -245,8 +271,9 @@ def riepilogo_con_claude(impegni: list[dict], oggi: date,
 
 # --------------------- elenco impegni (generato dal codice) ------------------
 
-def lista_impegni(impegni: list[dict], oggi: date) -> str:
-    """Solo la parte a elenco: Oggi / Domani / Prossimi giorni."""
+def lista_impegni(impegni: list[dict], oggi: date,
+                  arretrati: list[dict] | None = None) -> str:
+    """La parte a elenco: Arretrati / Oggi / Domani / Prossimi giorni."""
     domani = oggi + timedelta(days=1)
 
     def riga(i, con_giorno=False):
@@ -258,11 +285,21 @@ def lista_impegni(impegni: list[dict], oggi: date) -> str:
             pezzi.append(f"— ore {i['ora']}")
         return " ".join(pezzi)
 
+    testo = []
+    if arretrati:
+        # Ordinati dal ritardo maggiore: le cose ferme da piu' tempo in cima
+        testo.append("⏳ <b>Arretrati</b>")
+        for a in sorted(arretrati, key=lambda x: x["ritardo"] or 0, reverse=True):
+            g = a["ritardo"]
+            testo.append(f"🔺 <b>{a['titolo']}</b> — da {g} "
+                         f"giorn{'o' if g == 1 else 'i'}")
+        testo.append("")
+
     di_oggi = [i for i in impegni if i["giorno"] == oggi]
     di_domani = [i for i in impegni if i["giorno"] == domani]
     prossimi = [i for i in impegni if i["giorno"] and i["giorno"] > domani]
 
-    testo = ["<b>Oggi</b>"]
+    testo.append("<b>Oggi</b>")
     testo += [riga(i) for i in di_oggi] if di_oggi else ["Nessun impegno 👌"]
     if di_domani:
         testo.append("\n<b>Domani</b>")
@@ -276,7 +313,8 @@ def lista_impegni(impegni: list[dict], oggi: date) -> str:
 # ------------------- fallback: il vecchio formato completo -------------------
 
 def riepilogo_classico(impegni: list[dict], oggi: date,
-                       meteo: str | None, ieri: tuple[int, int]) -> str:
+                       meteo: str | None, ieri: tuple[int, int],
+                       arretrati: list[dict] | None = None) -> str:
     testo = [f"📅 <b>{GIORNI[oggi.weekday()]} {oggi.day} {MESI[oggi.month-1]}</b>"]
     if meteo:
         testo.append(f"🌤 Bertinoro: {meteo}")
@@ -284,7 +322,7 @@ def riepilogo_classico(impegni: list[dict], oggi: date,
     if totali:
         testo.append(f"Ieri: {fatti}/{totali} impegni completati 💪")
     testo.append("")
-    testo.append(lista_impegni(impegni, oggi))
+    testo.append(lista_impegni(impegni, oggi, arretrati))
     return "\n".join(testo)
 
 
@@ -302,22 +340,26 @@ def invia_telegram(testo: str, html: bool) -> None:
 def main() -> None:
     oggi = datetime.now(ZoneInfo("Europe/Rome")).date()
     impegni = impegni_prossimi(oggi)
+    arretrati = impegni_arretrati(oggi)
     ieri = bilancio_ieri(oggi)
     meteo = meteo_bertinoro()
 
-    apertura = riepilogo_con_claude(impegni, oggi, meteo, ieri)
+    apertura = riepilogo_con_claude(impegni, arretrati, oggi, meteo, ieri)
     if apertura:
         # Apertura discorsiva di Claude + elenco preciso generato dal codice.
         # Il testo di Claude va "escapato" perche' il messaggio usa parse_mode
         # HTML per il grassetto dell'elenco.
         testo = (f"📅 <b>{GIORNI[oggi.weekday()]} {oggi.day} {MESI[oggi.month-1]}</b>\n"
                  f"{html.escape(apertura)}\n\n"
-                 f"{lista_impegni(impegni, oggi)}")
+                 f"{lista_impegni(impegni, oggi, arretrati)}")
         invia_telegram(testo, html=True)
-        print(f"Inviato riepilogo combinato ({len(impegni)} impegni)")
+        print(f"Inviato riepilogo combinato "
+              f"({len(impegni)} impegni, {len(arretrati)} arretrati)")
     else:
-        invia_telegram(riepilogo_classico(impegni, oggi, meteo, ieri), html=True)
-        print(f"Inviato riepilogo classico ({len(impegni)} impegni)")
+        invia_telegram(riepilogo_classico(impegni, oggi, meteo, ieri, arretrati),
+                       html=True)
+        print(f"Inviato riepilogo classico "
+              f"({len(impegni)} impegni, {len(arretrati)} arretrati)")
 
 
 if __name__ == "__main__":
