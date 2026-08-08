@@ -338,6 +338,8 @@ def invia_telegram(testo: str, html: bool) -> None:
 
 
 # ------------------------- dashboard per tablet ------------------------------
+# Stile "Almanacco": cielo d'alba sopra l'orizzonte (data, meteo, frase di
+# Claude), terra scura sotto (arretrati e impegni).
 
 from string import Template
 
@@ -352,70 +354,70 @@ DASHBOARD_TEMPLATE = Template("""<!doctype html>
 <title>Impegni</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,560;1,9..144,420&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Manrope:wght@400;600&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#191C22; --bg2:#15181D; --text:#F2EDE4; --dim:#9BA0A8;
-    --amber:#E0A458; --red:#C96A5B; --line:#2C313B;
+    --notte:#252A3D; --alba1:#3D4463; --alba2:#8A6E7E; --alba3:#D9A08B; --oro:#EFC99B;
+    --terra:#1C1F2B; --testo:#F4F1EC; --dim:#A8ABB8; --ambra:#E8B26A; --linea:#31364A;
   }
   *{box-sizing:border-box}
   html,body{margin:0}
-  body{
-    min-height:100vh;
-    background:radial-gradient(120% 90% at 20% 0%, var(--bg) 0%, var(--bg2) 100%);
-    color:var(--text);
-    font-family:Inter,-apple-system,system-ui,sans-serif;
-    -webkit-font-smoothing:antialiased;
+  body{min-height:100vh;background:var(--terra);color:var(--testo);
+    font-family:Manrope,-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  .cielo{
+    background:linear-gradient(180deg,var(--notte) 0%,var(--alba1) 38%,var(--alba2) 68%,var(--alba3) 92%,var(--oro) 100%);
+    padding:56px 0 46px;
   }
-  .wrap{max-width:860px;margin:0 auto;padding:52px 44px 40px}
-  .giorno{
-    font-family:Fraunces,Georgia,serif;font-weight:560;
-    font-size:clamp(56px,9vw,88px);line-height:1.02;letter-spacing:-.01em;
-  }
-  .giorno .mese{color:var(--dim);font-weight:420}
-  .meteo{margin-top:10px;font-size:21px;color:var(--dim)}
-  .epigrafe{
-    font-family:Fraunces,Georgia,serif;font-style:italic;font-weight:420;
-    font-size:clamp(24px,3.6vw,31px);line-height:1.4;
-    margin:36px 0 0;padding:0 0 0 22px;border-left:3px solid var(--line);
-  }
-  .blocco{margin-top:44px}
-  .etichetta{
-    font-size:14px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
-    color:var(--dim);margin-bottom:6px;
-  }
-  .arretrati{border-left:3px solid var(--amber);padding-left:20px}
-  .arretrati .etichetta{color:var(--amber)}
-  .riga{
-    display:flex;justify-content:space-between;align-items:baseline;gap:18px;
-    padding:15px 0;border-bottom:1px solid var(--line);
-  }
+  .colonna{max-width:780px;margin:0 auto;padding:0 40px}
+  .giorno{font-family:"Bricolage Grotesque",system-ui,sans-serif;font-weight:700;
+    font-size:clamp(52px,8.5vw,80px);line-height:1.04;letter-spacing:-.015em}
+  .giorno .mese{font-weight:500;color:var(--oro)}
+  .meteo{margin-top:12px;font-size:20px;color:#E8E2DA;opacity:.92}
+  .epigrafe{font-size:22px;line-height:1.55;margin:30px 0 0;max-width:36em;color:#F7F2EA}
+  .orizzonte{height:4px;background:var(--oro);opacity:.9}
+  .terra{padding:40px 0 44px}
+  .etichetta{font-size:13px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--dim);margin-bottom:4px}
+  .blocco{margin-top:34px}
+  .blocco:first-child{margin-top:0}
+  .arretrati{background:rgba(232,178,106,.08);border:1px solid rgba(232,178,106,.35);
+    border-radius:14px;padding:18px 22px 8px}
+  .arretrati .etichetta{color:var(--ambra)}
+  .riga{display:flex;justify-content:space-between;align-items:baseline;gap:18px;
+    padding:14px 0;border-bottom:1px solid var(--linea)}
   .riga:last-child{border-bottom:none}
-  .riga .t{font-size:26px;font-weight:500}
-  .riga .ora{font-size:22px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
-  .riga .giorni{font-size:19px;color:var(--amber);white-space:nowrap}
-  .minori .riga .t{font-size:21px;font-weight:400}
-  .minori .riga{padding:11px 0}
-  .minori .riga .ora{font-size:18px}
-  .vuoto{font-size:23px;color:var(--dim);padding:14px 0}
+  .riga .t{font-size:24px;font-weight:600}
+  .riga .ora{font-size:20px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .riga .giorni{font-size:18px;color:var(--ambra);white-space:nowrap}
+  .minori .riga .t{font-size:19px;font-weight:400}
+  .minori .riga{padding:10px 0}
+  .minori .riga .ora{font-size:17px}
   .due-col{display:grid;grid-template-columns:1fr 1fr;gap:0 48px}
-  @media (max-width:640px){.due-col{grid-template-columns:1fr}.wrap{padding:36px 24px}}
-  footer{margin-top:52px;font-size:14px;color:var(--dim);opacity:.7}
+  .vuoto{font-size:21px;color:var(--dim);padding:12px 0}
+  @media(max-width:640px){.due-col{grid-template-columns:1fr}.colonna{padding:0 24px}}
+  footer{margin-top:44px;font-size:13px;color:var(--dim);opacity:.75}
 </style>
 </head>
 <body>
-<main class="wrap">
-  <div class="giorno">$giorno_settimana $giorno_numero<br><span class="mese">$mese</span></div>
-  $meteo_html
-  $epigrafe_html
-  $arretrati_html
-  <section class="blocco">
-    <div class="etichetta">Oggi</div>
-    $oggi_html
-  </section>
-  $futuro_html
-  <footer>Aggiornato alle $ora_agg</footer>
-</main>
+  <div class="cielo">
+    <div class="colonna">
+      <div class="giorno">$giorno_settimana $giorno_numero<br><span class="mese">$mese</span></div>
+      $meteo_html
+      $epigrafe_html
+    </div>
+  </div>
+  <div class="orizzonte"></div>
+  <div class="terra">
+    <div class="colonna">
+      $arretrati_html
+      <section class="blocco">
+        <div class="etichetta">Oggi</div>
+        $oggi_html
+      </section>
+      $futuro_html
+      <footer>Aggiornato alle $ora_agg</footer>
+    </div>
+  </div>
 </body>
 </html>
 """)
@@ -424,7 +426,7 @@ DASHBOARD_TEMPLATE = Template("""<!doctype html>
 def _riga_task(i: dict, mostra_giorno: bool = False) -> str:
     nome = html.escape(i["titolo"])
     if mostra_giorno and i["giorno"]:
-        nome = (f"{GIORNI[i['giorno'].weekday()][:3]} {i['giorno'].day} · " + nome)
+        nome = f"{GIORNI[i['giorno'].weekday()][:3]} {i['giorno'].day} · " + nome
     ora = f'<span class="ora">{i["ora"]}</span>' if i["ora"] else ""
     return f'<div class="riga"><span class="t">{nome}</span>{ora}</div>'
 
@@ -432,7 +434,7 @@ def _riga_task(i: dict, mostra_giorno: bool = False) -> str:
 def genera_dashboard(impegni: list[dict], arretrati: list[dict], oggi: date,
                      meteo: str | None, apertura: str | None,
                      percorso: str = "site/index.html") -> None:
-    """Scrive la pagina HTML per il tablet."""
+    """Scrive la pagina HTML per il tablet (stile Almanacco)."""
     domani = oggi + timedelta(days=1)
     di_oggi = [i for i in impegni if i["giorno"] == oggi]
     di_domani = [i for i in impegni if i["giorno"] == domani]
