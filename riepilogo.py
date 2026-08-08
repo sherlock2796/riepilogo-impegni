@@ -337,6 +337,153 @@ def invia_telegram(testo: str, html: bool) -> None:
     r.raise_for_status()
 
 
+# ------------------------- dashboard per tablet ------------------------------
+
+from string import Template
+
+DASHBOARD_TEMPLATE = Template("""<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="1800">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Impegni</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,560;1,9..144,420&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#191C22; --bg2:#15181D; --text:#F2EDE4; --dim:#9BA0A8;
+    --amber:#E0A458; --red:#C96A5B; --line:#2C313B;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    min-height:100vh;
+    background:radial-gradient(120% 90% at 20% 0%, var(--bg) 0%, var(--bg2) 100%);
+    color:var(--text);
+    font-family:Inter,-apple-system,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:860px;margin:0 auto;padding:52px 44px 40px}
+  .giorno{
+    font-family:Fraunces,Georgia,serif;font-weight:560;
+    font-size:clamp(56px,9vw,88px);line-height:1.02;letter-spacing:-.01em;
+  }
+  .giorno .mese{color:var(--dim);font-weight:420}
+  .meteo{margin-top:10px;font-size:21px;color:var(--dim)}
+  .epigrafe{
+    font-family:Fraunces,Georgia,serif;font-style:italic;font-weight:420;
+    font-size:clamp(24px,3.6vw,31px);line-height:1.4;
+    margin:36px 0 0;padding:0 0 0 22px;border-left:3px solid var(--line);
+  }
+  .blocco{margin-top:44px}
+  .etichetta{
+    font-size:14px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--dim);margin-bottom:6px;
+  }
+  .arretrati{border-left:3px solid var(--amber);padding-left:20px}
+  .arretrati .etichetta{color:var(--amber)}
+  .riga{
+    display:flex;justify-content:space-between;align-items:baseline;gap:18px;
+    padding:15px 0;border-bottom:1px solid var(--line);
+  }
+  .riga:last-child{border-bottom:none}
+  .riga .t{font-size:26px;font-weight:500}
+  .riga .ora{font-size:22px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .riga .giorni{font-size:19px;color:var(--amber);white-space:nowrap}
+  .minori .riga .t{font-size:21px;font-weight:400}
+  .minori .riga{padding:11px 0}
+  .minori .riga .ora{font-size:18px}
+  .vuoto{font-size:23px;color:var(--dim);padding:14px 0}
+  .due-col{display:grid;grid-template-columns:1fr 1fr;gap:0 48px}
+  @media (max-width:640px){.due-col{grid-template-columns:1fr}.wrap{padding:36px 24px}}
+  footer{margin-top:52px;font-size:14px;color:var(--dim);opacity:.7}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="giorno">$giorno_settimana $giorno_numero<br><span class="mese">$mese</span></div>
+  $meteo_html
+  $epigrafe_html
+  $arretrati_html
+  <section class="blocco">
+    <div class="etichetta">Oggi</div>
+    $oggi_html
+  </section>
+  $futuro_html
+  <footer>Aggiornato alle $ora_agg</footer>
+</main>
+</body>
+</html>
+""")
+
+
+def _riga_task(i: dict, mostra_giorno: bool = False) -> str:
+    nome = html.escape(i["titolo"])
+    if mostra_giorno and i["giorno"]:
+        nome = (f"{GIORNI[i['giorno'].weekday()][:3]} {i['giorno'].day} · " + nome)
+    ora = f'<span class="ora">{i["ora"]}</span>' if i["ora"] else ""
+    return f'<div class="riga"><span class="t">{nome}</span>{ora}</div>'
+
+
+def genera_dashboard(impegni: list[dict], arretrati: list[dict], oggi: date,
+                     meteo: str | None, apertura: str | None,
+                     percorso: str = "site/index.html") -> None:
+    """Scrive la pagina HTML per il tablet."""
+    domani = oggi + timedelta(days=1)
+    di_oggi = [i for i in impegni if i["giorno"] == oggi]
+    di_domani = [i for i in impegni if i["giorno"] == domani]
+    prossimi = [i for i in impegni if i["giorno"] and i["giorno"] > domani]
+
+    meteo_html = (f'<div class="meteo">Bertinoro · {html.escape(meteo)}</div>'
+                  if meteo else "")
+    epigrafe_html = (f'<p class="epigrafe">{html.escape(apertura)}</p>'
+                     if apertura else "")
+
+    if arretrati:
+        righe = "".join(
+            f'<div class="riga"><span class="t">{html.escape(a["titolo"])}</span>'
+            f'<span class="giorni">da {a["ritardo"]} '
+            f'giorn{"o" if a["ritardo"] == 1 else "i"}</span></div>'
+            for a in sorted(arretrati, key=lambda x: x["ritardo"] or 0, reverse=True))
+        arretrati_html = (f'<section class="blocco arretrati">'
+                          f'<div class="etichetta">Arretrati</div>{righe}</section>')
+    else:
+        arretrati_html = ""
+
+    oggi_html = ("".join(_riga_task(i) for i in di_oggi)
+                 or '<div class="vuoto">Nessun impegno — giornata libera</div>')
+
+    colonne = []
+    if di_domani:
+        colonne.append('<div><div class="etichetta">Domani</div>'
+                       + "".join(_riga_task(i) for i in di_domani) + "</div>")
+    if prossimi:
+        colonne.append('<div><div class="etichetta">Prossimi giorni</div>'
+                       + "".join(_riga_task(i, True) for i in prossimi) + "</div>")
+    futuro_html = (f'<section class="blocco minori"><div class="due-col">'
+                   f'{"".join(colonne)}</div></section>' if colonne else "")
+
+    pagina = DASHBOARD_TEMPLATE.substitute(
+        giorno_settimana=GIORNI[oggi.weekday()],
+        giorno_numero=oggi.day,
+        mese=MESI[oggi.month - 1],
+        meteo_html=meteo_html,
+        epigrafe_html=epigrafe_html,
+        arretrati_html=arretrati_html,
+        oggi_html=oggi_html,
+        futuro_html=futuro_html,
+        ora_agg=datetime.now(ZoneInfo("Europe/Rome")).strftime("%H:%M"),
+    )
+    os.makedirs(os.path.dirname(percorso), exist_ok=True)
+    with open(percorso, "w", encoding="utf-8") as f:
+        f.write(pagina)
+    print(f"Dashboard scritta in {percorso}")
+
+
 def main() -> None:
     oggi = datetime.now(ZoneInfo("Europe/Rome")).date()
     impegni = impegni_prossimi(oggi)
@@ -345,6 +492,12 @@ def main() -> None:
     meteo = meteo_bertinoro()
 
     apertura = riepilogo_con_claude(impegni, arretrati, oggi, meteo, ieri)
+
+    # Dashboard per il tablet: se fallisce, il Telegram parte comunque
+    try:
+        genera_dashboard(impegni, arretrati, oggi, meteo, apertura)
+    except Exception as e:
+        print(f"Dashboard non generata: {e}", file=sys.stderr)
     if apertura:
         # Apertura discorsiva di Claude + elenco preciso generato dal codice.
         # Il testo di Claude va "escapato" perche' il messaggio usa parse_mode
