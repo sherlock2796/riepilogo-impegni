@@ -340,6 +340,9 @@ def invia_telegram(testo: str, html: bool) -> None:
 # ------------------------- dashboard per tablet ------------------------------
 # Stile "Almanacco": cielo d'alba sopra l'orizzonte (data, meteo, frase di
 # Claude), terra scura sotto (arretrati e impegni).
+# La pagina e' interattiva: ogni riga si puo' spuntare, rimandare o cambiare
+# di priorita', e si possono aggiungere nuovi impegni. Tutte le azioni passano
+# dalla Netlify Function /.netlify/functions/azioni, che custodisce il token.
 
 from string import Template
 
@@ -359,11 +362,15 @@ DASHBOARD_TEMPLATE = Template("""<!doctype html>
   :root{
     --notte:#252A3D; --alba1:#3D4463; --alba2:#8A6E7E; --alba3:#D9A08B; --oro:#EFC99B;
     --terra:#1C1F2B; --testo:#F4F1EC; --dim:#A8ABB8; --ambra:#E8B26A; --linea:#31364A;
+    --rosso:#E5786B; --verde:#7FBF8F;
   }
   *{box-sizing:border-box}
   html,body{margin:0}
   body{min-height:100vh;background:var(--terra);color:var(--testo);
-    font-family:Manrope,-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+    font-family:Manrope,-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased;
+    -webkit-tap-highlight-color:transparent}
+  [hidden]{display:none !important}
+  button{font-family:inherit;color:inherit}
   .cielo{
     background:linear-gradient(180deg,var(--notte) 0%,var(--alba1) 38%,var(--alba2) 68%,var(--alba3) 92%,var(--oro) 100%);
     padding:56px 0 46px;
@@ -383,30 +390,71 @@ DASHBOARD_TEMPLATE = Template("""<!doctype html>
   .arretrati{background:rgba(232,178,106,.08);border:1px solid rgba(232,178,106,.35);
     border-radius:14px;padding:18px 22px 8px}
   .arretrati .etichetta{color:var(--ambra)}
-  .riga{display:flex;justify-content:space-between;align-items:baseline;gap:18px;
-    padding:14px 0;border-bottom:1px solid var(--linea)}
+
+  /* --- righe --- */
+  .riga{display:flex;flex-wrap:wrap;align-items:center;gap:14px;
+    padding:12px 0;border-bottom:1px solid var(--linea)}
   .riga:last-child{border-bottom:none}
-  .riga .t{font-size:24px;font-weight:600}
+  .spunta{flex:none;width:32px;height:32px;border-radius:50%;cursor:pointer;
+    border:2px solid var(--dim);background:transparent;padding:0;
+    transition:border-color .15s, background .15s}
+  .spunta:active{transform:scale(.92)}
+  .riga .t{flex:1 1 auto;text-align:left;background:none;border:0;padding:6px 0;
+    font-size:24px;font-weight:600;cursor:pointer;min-width:0}
   .riga .ora{font-size:20px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
   .riga .giorni{font-size:18px;color:var(--ambra);white-space:nowrap}
   .minori .riga .t{font-size:19px;font-weight:400}
-  .minori .riga{padding:10px 0}
+  .minori .riga{padding:8px 0}
   .minori .riga .ora{font-size:17px}
+  .minori .spunta{width:26px;height:26px}
   .due-col{display:grid;grid-template-columns:1fr 1fr;gap:0 48px}
   .vuoto{font-size:21px;color:var(--dim);padding:12px 0}
-  @media(max-width:640px){.due-col{grid-template-columns:1fr}.colonna{padding:0 24px}}
-  footer{margin-top:44px;font-size:13px;color:var(--dim);opacity:.75}
-  .spunta{
-    flex:none;width:30px;height:30px;border-radius:50%;cursor:pointer;
-    border:2px solid var(--dim);background:transparent;align-self:center;
-    transition:border-color .15s, background .15s;
-  }
-  .riga{align-items:center}
-  .riga .t{margin-right:auto}
   .riga.fatta .spunta{background:var(--ambra);border-color:var(--ambra)}
-  .riga.fatta .t,.riga.fatta .ora,.riga.fatta .giorni{
-    text-decoration:line-through;opacity:.45}
-  .riga.errore .spunta{border-color:#E5484D}
+  .riga.fatta .t,.riga.fatta .ora,.riga.fatta .giorni{text-decoration:line-through;opacity:.45}
+  .riga.errore .spunta{border-color:var(--rosso)}
+  .riga.spostata .t{opacity:.5}
+
+  /* --- barra azioni sotto la riga --- */
+  .azioni{flex-basis:100%;display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+    padding:4px 0 10px 46px}
+  .chip{background:rgba(255,255,255,.06);border:1px solid var(--linea);color:var(--testo);
+    border-radius:999px;padding:9px 16px;font-size:16px;cursor:pointer}
+  .chip:active{background:rgba(255,255,255,.14)}
+  .chip.attivo{background:var(--ambra);border-color:var(--ambra);color:#20242F;font-weight:600}
+  .chip.pri{min-width:74px;text-align:center}
+  .sep{width:1px;height:24px;background:var(--linea);margin:0 4px}
+
+  /* --- pannello nuovo impegno --- */
+  .aggiungi{background:none;border:1px dashed var(--linea);color:var(--dim);
+    border-radius:10px;padding:10px 18px;font-size:17px;cursor:pointer;margin-top:10px}
+  .aggiungi:active{color:var(--testo);border-color:var(--dim)}
+  .nuovo{margin-top:14px;background:rgba(255,255,255,.04);border:1px solid var(--linea);
+    border-radius:14px;padding:18px}
+  .nuovo input{width:100%;background:rgba(0,0,0,.25);border:1px solid var(--linea);
+    border-radius:10px;color:var(--testo);font-size:20px;padding:12px 14px;font-family:inherit}
+  .nuovo input:focus{outline:2px solid var(--ambra);outline-offset:-1px}
+  .gruppo{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
+  .gruppo .ttl{font-size:13px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--dim);width:100%;margin-bottom:-2px}
+  .primario{background:var(--ambra);border:0;color:#20242F;font-weight:700;font-size:18px;
+    border-radius:10px;padding:12px 24px;cursor:pointer;margin-top:16px}
+  .annulla{background:none;border:0;color:var(--dim);font-size:16px;padding:12px;cursor:pointer}
+
+  footer{margin-top:44px;font-size:13px;color:var(--dim);opacity:.75;
+    display:flex;gap:16px;align-items:center}
+  .rigenera{background:none;border:1px solid var(--linea);color:var(--dim);
+    border-radius:999px;padding:6px 14px;font-size:13px;cursor:pointer}
+
+  /* --- messaggino di conferma --- */
+  #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);
+    background:#2A3042;border:1px solid var(--linea);border-radius:999px;
+    padding:12px 24px;font-size:17px;opacity:0;pointer-events:none;
+    transition:opacity .2s, transform .2s;z-index:10}
+  #toast.visibile{opacity:1;transform:translateX(-50%) translateY(0)}
+  #toast.ko{border-color:var(--rosso);color:var(--rosso)}
+
+  @media(max-width:640px){.due-col{grid-template-columns:1fr}.colonna{padding:0 24px}
+    .azioni{padding-left:0}}
 </style>
 </head>
 <body>
@@ -423,32 +471,243 @@ DASHBOARD_TEMPLATE = Template("""<!doctype html>
       $arretrati_html
       <section class="blocco">
         <div class="etichetta">Oggi</div>
-        $oggi_html
+        <div id="lista-oggi">$oggi_html</div>
+        <button class="aggiungi" id="apri-nuovo">+ Aggiungi impegno</button>
+        <div class="nuovo" id="pannello-nuovo" hidden>
+          <input id="nuovo-titolo" placeholder="Cosa c'e' da fare?" maxlength="200">
+          <div class="gruppo" id="g-quando">
+            <span class="ttl">Quando</span>
+            <button class="chip attivo" data-scarto="0">Oggi</button>
+            <button class="chip" data-scarto="1">Domani</button>
+            <button class="chip" data-scarto="7">Fra una settimana</button>
+          </div>
+          <div class="gruppo" id="g-priorita">
+            <span class="ttl">Priorita</span>
+            <button class="chip" data-val="Alta">Alta</button>
+            <button class="chip attivo" data-val="Media">Media</button>
+            <button class="chip" data-val="Bassa">Bassa</button>
+          </div>
+          <div class="gruppo" id="g-tipo">
+            <span class="ttl">Tipo</span>
+            <button class="chip" data-val="Lavoro">Lavoro</button>
+            <button class="chip" data-val="Personale">Personale</button>
+            <button class="chip" data-val="Appuntamento">Appuntamento</button>
+            <button class="chip" data-val="Sport">Sport</button>
+            <button class="chip" data-val="Casa">Casa</button>
+          </div>
+          <button class="primario" id="conferma-nuovo">Aggiungi</button>
+          <button class="annulla" id="annulla-nuovo">Annulla</button>
+        </div>
       </section>
       $futuro_html
-      <footer>Aggiornato alle $ora_agg</footer>
+      <footer>
+        <span>Aggiornato alle $ora_agg</span>
+        <button class="rigenera" id="rigenera">Rigenera pagina</button>
+      </footer>
     </div>
   </div>
+<div id="toast"></div>
 <script>
-document.addEventListener("click", async (ev) => {
-  const bottone = ev.target.closest(".spunta");
-  if (!bottone) return;
-  const riga = bottone.closest(".riga");
-  if (riga.classList.contains("fatta")) return;   // gia' spuntata
-  riga.classList.add("fatta");                     // feedback immediato
-  try {
-    const r = await fetch("/.netlify/functions/segna-fatto", {
+(function(){
+  var API = "/.netlify/functions/azioni";
+  var toast = document.getElementById("toast");
+  var timerToast;
+
+  function avvisa(testo, errore){
+    toast.textContent = testo;
+    toast.className = "visibile" + (errore ? " ko" : "");
+    clearTimeout(timerToast);
+    timerToast = setTimeout(function(){ toast.className = ""; }, 2600);
+  }
+
+  async function chiama(corpo){
+    var r = await fetch(API, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: riga.dataset.id }),
+      body: JSON.stringify(corpo)
     });
-    if (!r.ok) throw new Error(await r.text());
-  } catch (e) {
-    riga.classList.remove("fatta");                // annullo se e' fallita
-    riga.classList.add("errore");
-    setTimeout(() => riga.classList.remove("errore"), 2500);
+    var dati = {};
+    try { dati = await r.json(); } catch(e){}
+    if (!r.ok) throw new Error(dati.errore || ("errore " + r.status));
+    return dati;
   }
-});
+
+  function chiudiAzioni(tranne){
+    var aperte = document.querySelectorAll(".azioni");
+    for (var i = 0; i < aperte.length; i++){
+      if (aperte[i] !== tranne) aperte[i].remove();
+    }
+  }
+
+  // Costruisce la barra di azioni sotto una riga
+  function apriAzioni(riga){
+    if (riga.querySelector(".azioni")) { chiudiAzioni(); return; }
+    chiudiAzioni();
+    var barra = document.createElement("div");
+    barra.className = "azioni";
+    var pri = riga.dataset.priorita || "";
+    barra.innerHTML =
+      '<button class="chip" data-rimanda="1">Rimanda a domani</button>' +
+      '<button class="chip" data-rimanda="7">+7 giorni</button>' +
+      '<span class="sep"></span>' +
+      '<button class="chip pri' + (pri === "Alta" ? " attivo" : "") + '" data-pri="Alta">Alta</button>' +
+      '<button class="chip pri' + (pri === "Media" ? " attivo" : "") + '" data-pri="Media">Media</button>' +
+      '<button class="chip pri' + (pri === "Bassa" ? " attivo" : "") + '" data-pri="Bassa">Bassa</button>';
+    riga.appendChild(barra);
+  }
+
+  document.addEventListener("click", async function(ev){
+    var el = ev.target;
+
+    // --- spunta come fatto ---
+    var bottoneSpunta = el.closest(".spunta");
+    if (bottoneSpunta){
+      var riga = bottoneSpunta.closest(".riga");
+      if (riga.classList.contains("fatta")) return;
+      riga.classList.add("fatta");
+      chiudiAzioni();
+      try {
+        await chiama({ azione: "fatto", id: riga.dataset.id });
+        avvisa("Fatto");
+      } catch(e){
+        riga.classList.remove("fatta");
+        riga.classList.add("errore");
+        setTimeout(function(){ riga.classList.remove("errore"); }, 2500);
+        avvisa("Non salvato: " + e.message, true);
+      }
+      return;
+    }
+
+    // --- apre/chiude le azioni della riga ---
+    var titolo = el.closest(".riga .t");
+    if (titolo){ apriAzioni(titolo.closest(".riga")); return; }
+
+    // --- rimanda ---
+    var btnRimanda = el.closest("[data-rimanda]");
+    if (btnRimanda){
+      var riga2 = btnRimanda.closest(".riga");
+      var giorni = parseInt(btnRimanda.dataset.rimanda, 10);
+      try {
+        var res = await chiama({ azione: "rimanda", id: riga2.dataset.id, giorni: giorni });
+        riga2.classList.add("spostata");
+        chiudiAzioni();
+        avvisa(giorni === 1 ? "Rimandato a domani" : "Rimandato al " + res.data);
+      } catch(e){ avvisa("Non salvato: " + e.message, true); }
+      return;
+    }
+
+    // --- cambia priorita ---
+    var btnPri = el.closest("[data-pri]");
+    if (btnPri){
+      var riga3 = btnPri.closest(".riga");
+      var valore = btnPri.dataset.pri;
+      try {
+        await chiama({ azione: "priorita", id: riga3.dataset.id, valore: valore });
+        riga3.dataset.priorita = valore;
+        var fratelli = btnPri.parentNode.querySelectorAll("[data-pri]");
+        for (var j = 0; j < fratelli.length; j++) fratelli[j].classList.remove("attivo");
+        btnPri.classList.add("attivo");
+        avvisa("Priorita: " + valore);
+      } catch(e){ avvisa("Non salvato: " + e.message, true); }
+      return;
+    }
+
+    // --- chip dei gruppi nel pannello "nuovo" ---
+    var chip = el.closest(".gruppo .chip");
+    if (chip){
+      var gruppo = chip.parentNode;
+      var tutti = gruppo.querySelectorAll(".chip");
+      var eraAttivo = chip.classList.contains("attivo");
+      for (var k = 0; k < tutti.length; k++) tutti[k].classList.remove("attivo");
+      // Nel gruppo Tipo si puo' anche deselezionare; negli altri no
+      if (!(eraAttivo && gruppo.id === "g-tipo")) chip.classList.add("attivo");
+      return;
+    }
+
+    // --- apre il pannello nuovo impegno ---
+    if (el.closest("#apri-nuovo")){
+      document.getElementById("pannello-nuovo").hidden = false;
+      document.getElementById("apri-nuovo").hidden = true;
+      document.getElementById("nuovo-titolo").focus();
+      return;
+    }
+    if (el.closest("#annulla-nuovo")){
+      document.getElementById("pannello-nuovo").hidden = true;
+      document.getElementById("apri-nuovo").hidden = false;
+      return;
+    }
+
+    // --- conferma nuovo impegno ---
+    if (el.closest("#conferma-nuovo")){
+      var campo = document.getElementById("nuovo-titolo");
+      var testo = campo.value.trim();
+      if (!testo){ campo.focus(); avvisa("Manca il titolo", true); return; }
+      var attivoQuando = document.querySelector("#g-quando .chip.attivo");
+      var attivoPri = document.querySelector("#g-priorita .chip.attivo");
+      var attivoTipo = document.querySelector("#g-tipo .chip.attivo");
+      var scarto = attivoQuando ? parseInt(attivoQuando.dataset.scarto, 10) : 0;
+      var bottone = el.closest("#conferma-nuovo");
+      bottone.disabled = true;
+      try {
+        var creato = await chiama({
+          azione: "nuovo",
+          titolo: testo,
+          scartoGiorni: scarto,
+          priorita: attivoPri ? attivoPri.dataset.val : null,
+          tipo: attivoTipo ? attivoTipo.dataset.val : null
+        });
+        if (scarto === 0){
+          // Lo aggiungo subito all'elenco di oggi, gia' spuntabile
+          var lista = document.getElementById("lista-oggi");
+          var vuoto = lista.querySelector(".vuoto");
+          if (vuoto) vuoto.remove();
+          var nuovaRiga = document.createElement("div");
+          nuovaRiga.className = "riga";
+          nuovaRiga.dataset.id = creato.id;
+          nuovaRiga.dataset.priorita = attivoPri ? attivoPri.dataset.val : "";
+          var b = document.createElement("button");
+          b.className = "spunta"; b.setAttribute("aria-label", "Segna fatto");
+          var t = document.createElement("button");
+          t.className = "t"; t.textContent = testo;
+          nuovaRiga.appendChild(b); nuovaRiga.appendChild(t);
+          lista.appendChild(nuovaRiga);
+        }
+        campo.value = "";
+        document.getElementById("pannello-nuovo").hidden = true;
+        document.getElementById("apri-nuovo").hidden = false;
+        avvisa(scarto === 0 ? "Aggiunto a oggi" : "Aggiunto per il " + creato.data);
+      } catch(e){
+        avvisa("Non salvato: " + e.message, true);
+      } finally {
+        bottone.disabled = false;
+      }
+      return;
+    }
+
+    // --- rigenera la pagina ---
+    if (el.closest("#rigenera")){
+      var br = el.closest("#rigenera");
+      br.disabled = true;
+      try {
+        await chiama({ azione: "aggiorna" });
+        avvisa("Rigenerazione avviata, ricarico fra poco");
+        setTimeout(function(){ location.reload(); }, 90000);
+      } catch(e){
+        avvisa("Non avviata: " + e.message, true);
+        br.disabled = false;
+      }
+      return;
+    }
+
+    // Tocco fuori: chiude le barre aperte
+    if (!el.closest(".azioni")) chiudiAzioni();
+  });
+
+  // Invio nel campo titolo = conferma
+  document.getElementById("nuovo-titolo").addEventListener("keydown", function(ev){
+    if (ev.key === "Enter") document.getElementById("conferma-nuovo").click();
+  });
+})();
 </script>
 </body>
 </html>
@@ -460,15 +719,16 @@ def _riga_task(i: dict, mostra_giorno: bool = False) -> str:
     if mostra_giorno and i["giorno"]:
         nome = f"{GIORNI[i['giorno'].weekday()][:3]} {i['giorno'].day} · " + nome
     ora = f'<span class="ora">{i["ora"]}</span>' if i["ora"] else ""
-    return (f'<div class="riga" data-id="{i["id"]}">'
+    pri = html.escape(i.get("priorita") or "")
+    return (f'<div class="riga" data-id="{i["id"]}" data-priorita="{pri}">'
             f'<button class="spunta" aria-label="Segna fatto"></button>'
-            f'<span class="t">{nome}</span>{ora}</div>')
+            f'<button class="t">{nome}</button>{ora}</div>')
 
 
 def genera_dashboard(impegni: list[dict], arretrati: list[dict], oggi: date,
                      meteo: str | None, apertura: str | None,
                      percorso: str = "site/index.html") -> None:
-    """Scrive la pagina HTML per il tablet (stile Almanacco)."""
+    """Scrive la pagina HTML interattiva per il tablet (stile Almanacco)."""
     domani = oggi + timedelta(days=1)
     di_oggi = [i for i in impegni if i["giorno"] == oggi]
     di_domani = [i for i in impegni if i["giorno"] == domani]
@@ -481,9 +741,10 @@ def genera_dashboard(impegni: list[dict], arretrati: list[dict], oggi: date,
 
     if arretrati:
         righe = "".join(
-            f'<div class="riga" data-id="{a["id"]}">'
+            f'<div class="riga" data-id="{a["id"]}" '
+            f'data-priorita="{html.escape(a.get("priorita") or "")}">'
             f'<button class="spunta" aria-label="Segna fatto"></button>'
-            f'<span class="t">{html.escape(a["titolo"])}</span>'
+            f'<button class="t">{html.escape(a["titolo"])}</button>'
             f'<span class="giorni">da {a["ritardo"]} '
             f'giorn{"o" if a["ritardo"] == 1 else "i"}</span></div>'
             for a in sorted(arretrati, key=lambda x: x["ritardo"] or 0, reverse=True))
