@@ -32,6 +32,7 @@ jobs:
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
         run: |
           npx --yes netlify-cli@17 deploy --prod --dir=site \
+            --functions=funzioni \
             --site "$NETLIFY_SITE_ID" --auth "$NETLIFY_AUTH_TOKEN" \
             --message "Riepilogo $(date +%F)"
           echo "--- verifica content-type servito ---"
