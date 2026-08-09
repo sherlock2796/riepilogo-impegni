@@ -143,7 +143,7 @@ def estrai(pagina: dict) -> dict:
     sel = p["Tipo"]["select"]
     tipo = sel["name"] if sel else None
     note = "".join(t["plain_text"] for t in p["Note"]["rich_text"]) or None
-    return {"titolo": titolo, "giorno": giorno, "ora": ora,
+    return {"id": pagina["id"], "titolo": titolo, "giorno": giorno, "ora": ora,
             "priorita": priorita, "tipo": tipo, "note": note}
 
 
@@ -396,6 +396,17 @@ DASHBOARD_TEMPLATE = Template("""<!doctype html>
   .vuoto{font-size:21px;color:var(--dim);padding:12px 0}
   @media(max-width:640px){.due-col{grid-template-columns:1fr}.colonna{padding:0 24px}}
   footer{margin-top:44px;font-size:13px;color:var(--dim);opacity:.75}
+  .spunta{
+    flex:none;width:30px;height:30px;border-radius:50%;cursor:pointer;
+    border:2px solid var(--dim);background:transparent;align-self:center;
+    transition:border-color .15s, background .15s;
+  }
+  .riga{align-items:center}
+  .riga .t{margin-right:auto}
+  .riga.fatta .spunta{background:var(--ambra);border-color:var(--ambra)}
+  .riga.fatta .t,.riga.fatta .ora,.riga.fatta .giorni{
+    text-decoration:line-through;opacity:.45}
+  .riga.errore .spunta{border-color:#E5484D}
 </style>
 </head>
 <body>
@@ -418,6 +429,27 @@ DASHBOARD_TEMPLATE = Template("""<!doctype html>
       <footer>Aggiornato alle $ora_agg</footer>
     </div>
   </div>
+<script>
+document.addEventListener("click", async (ev) => {
+  const bottone = ev.target.closest(".spunta");
+  if (!bottone) return;
+  const riga = bottone.closest(".riga");
+  if (riga.classList.contains("fatta")) return;   // gia' spuntata
+  riga.classList.add("fatta");                     // feedback immediato
+  try {
+    const r = await fetch("/.netlify/functions/segna-fatto", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: riga.dataset.id }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+  } catch (e) {
+    riga.classList.remove("fatta");                // annullo se e' fallita
+    riga.classList.add("errore");
+    setTimeout(() => riga.classList.remove("errore"), 2500);
+  }
+});
+</script>
 </body>
 </html>
 """)
@@ -428,7 +460,9 @@ def _riga_task(i: dict, mostra_giorno: bool = False) -> str:
     if mostra_giorno and i["giorno"]:
         nome = f"{GIORNI[i['giorno'].weekday()][:3]} {i['giorno'].day} · " + nome
     ora = f'<span class="ora">{i["ora"]}</span>' if i["ora"] else ""
-    return f'<div class="riga"><span class="t">{nome}</span>{ora}</div>'
+    return (f'<div class="riga" data-id="{i["id"]}">'
+            f'<button class="spunta" aria-label="Segna fatto"></button>'
+            f'<span class="t">{nome}</span>{ora}</div>')
 
 
 def genera_dashboard(impegni: list[dict], arretrati: list[dict], oggi: date,
@@ -447,7 +481,9 @@ def genera_dashboard(impegni: list[dict], arretrati: list[dict], oggi: date,
 
     if arretrati:
         righe = "".join(
-            f'<div class="riga"><span class="t">{html.escape(a["titolo"])}</span>'
+            f'<div class="riga" data-id="{a["id"]}">'
+            f'<button class="spunta" aria-label="Segna fatto"></button>'
+            f'<span class="t">{html.escape(a["titolo"])}</span>'
             f'<span class="giorni">da {a["ritardo"]} '
             f'giorn{"o" if a["ritardo"] == 1 else "i"}</span></div>'
             for a in sorted(arretrati, key=lambda x: x["ritardo"] or 0, reverse=True))
