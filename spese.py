@@ -55,6 +55,11 @@ RICORRENTE = re.compile(r"(\d{1,2})\s*-\s*(\d{1,2})\s*/\s*(\d{1,2})")
 MESI = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
         "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"]
 
+# Un budget si segnala come sforato solo se supera ENTRAMBE le soglie: cosi'
+# 37 euro su Entertainment non ti distraggono da 900 euro senza budget.
+SOGLIA_EURO = 25
+SOGLIA_QUOTA = 0.10
+
 
 # ---------------------------------------------------------------- accesso a Notion
 
@@ -85,15 +90,22 @@ def query_db(db_id, filtro=None):
 
 
 def carica_categorie():
-    """id pagina -> {nome, budget}. Attenzione: la proprieta' titolo si chiama
-    'Catigories' (refuso originale nel workspace, va lasciato cosi')."""
+    """id pagina -> {nome, budget, annuale, budget_annuo}. Attenzione: la proprieta'
+    titolo si chiama 'Catigories' (refuso originale nel workspace, va lasciato cosi').
+
+    Tipo assente o vuoto vale Mensile, cosi' lo script gira anche prima di aver
+    compilato la colonna e non serve classificare le categorie marginali."""
     mappa = {}
     for p in query_db(DB_CATEGORIE):
         props = p["properties"]
         titolo = props["Catigories"]["title"]
+        scelta = props["Tipo"].get("select") if "Tipo" in props else None
         mappa[p["id"]] = {
             "nome": titolo[0]["plain_text"] if titolo else "(senza nome)",
             "budget": props["Budget"]["number"] or 0,
+            "annuale": bool(scelta) and scelta["name"] == "Annuale",
+            "budget_annuo": (props["Budget annuo"]["number"] or 0)
+                            if "Budget annuo" in props else 0,
         }
     return mappa
 
@@ -291,12 +303,15 @@ def blocco_mensile(spec=None, oggi=None):
     # mese precedente, per il confronto
     fine_prec = inizio - timedelta(days=1)
     inizio_prec = fine_prec.replace(day=1)
+    # le categorie annuali si confrontano sul progressivo da gennaio
+    inizio_anno = date(inizio.year, 1, 1)
 
     categorie = carica_categorie()
-    voci = carica_spese(inizio_prec, fine)
+    voci = carica_spese(min(inizio_anno, inizio_prec), fine)
 
-    mese = [v for v in voci if v["data"] >= inizio]
-    mese_prec = [v for v in voci if v["data"] < inizio]
+    mese = [v for v in voci if inizio <= v["data"] <= fine]
+    mese_prec = [v for v in voci if inizio_prec <= v["data"] <= fine_prec]
+    anno = [v for v in voci if v["data"] >= inizio_anno]
     registrate = [v for v in mese if v["data"] <= oggi]
     pianificate = [v for v in mese if v["data"] > oggi]
 
@@ -315,47 +330,78 @@ def blocco_mensile(spec=None, oggi=None):
                                               if v["data"].day <= oggi.day]
         righe.append(f"{etichetta}: {euro(totale(confronto))}")
 
-    # aggregazione per categoria su TUTTO il mese (registrate + pianificate):
-    # il budget e' un impegno di spesa mensile, non un consuntivo a oggi.
-    per_cat = defaultdict(float)
+    # Aggregazione su TUTTO il mese (registrate + pianificate): il budget e' un
+    # impegno di spesa mensile, non un consuntivo a oggi.
+    per_mese = defaultdict(float)
     for v in mese:
-        per_cat[v["categoria"]] += v["importo"]
+        per_mese[v["categoria"]] += v["importo"]
+    per_anno = defaultdict(float)
+    for v in anno:
+        per_anno[v["categoria"]] += v["importo"]
 
-    con_budget, senza_budget = [], []
+    mensili, annuali, scoperte = [], [], []
     for id_cat, info in categorie.items():
-        speso = per_cat.get(id_cat, 0.0)
-        if info["budget"] > 0:
-            con_budget.append((info["nome"], speso, info["budget"]))
+        speso = per_mese.get(id_cat, 0.0)
+        if info["annuale"] and info["budget_annuo"] > 0:
+            annuali.append((info["nome"], per_anno.get(id_cat, 0.0),
+                            info["budget_annuo"], speso))
+        elif not info["annuale"] and info["budget"] > 0:
+            mensili.append((info["nome"], speso, info["budget"]))
         elif speso > 0:
-            senza_budget.append((info["nome"], speso))
+            scoperte.append((info["nome"], speso))
 
-    con_budget.sort(key=lambda r: -(r[1] - r[2]))  # gli sforamenti in cima
-    larghezza = max((len(n) for n, _, _ in con_budget), default=10)
-
-    righe.append("")
-    righe.append("<b>Budget</b>")
-    tabella = []
-    for nome, speso, budget in con_budget:
-        scarto = speso - budget
-        marcatore = "⚠" if scarto > 0 else " "
-        tabella.append(f"{marcatore} {nome:<{larghezza}} {speso:>8.2f} /{budget:>6.0f}")
-    righe.append("<pre>" + esc("\n".join(tabella)) + "</pre>")
-
-    tot_budget = sum(b for _, _, b in con_budget)
-    tot_speso_budget = sum(s for _, s, _ in con_budget)
-    residuo = tot_budget - tot_speso_budget
-    verbo = "residuo" if residuo >= 0 else "sforamento"
-    righe.append(f"Totale a budget: {euro(tot_speso_budget)} su {euro(tot_budget)} "
-                 f"({verbo} {euro(abs(residuo))})")
-
-    if senza_budget:
-        senza_budget.sort(key=lambda r: -r[1])
-        tot_senza = sum(s for _, s in senza_budget)
-        dettaglio = ", ".join(f"{esc(n)} {euro(s)}" for n, s in senza_budget)
-        quota = tot_senza / totale(mese) * 100 if mese else 0
+    # Le categorie senza nessun budget vanno in cima: sono il buco vero, e se
+    # restano in fondo l'occhio va al primo sforamento da 30 euro.
+    if scoperte:
+        scoperte.sort(key=lambda r: -r[1])
+        tot_scoperte = sum(s for _, s in scoperte)
+        quota = tot_scoperte / totale(mese) * 100 if mese else 0
         righe.append("")
-        righe.append(f"<b>Fuori budget</b>: {euro(tot_senza)} ({quota:.0f}% del mese)")
-        righe.append(dettaglio)
+        righe.append(f"<b>⚠ Senza budget: {euro(tot_scoperte)}</b> ({quota:.0f}% del mese)")
+        righe.append(", ".join(f"{esc(n)} {euro(s)}" for n, s in scoperte))
+
+    if mensili:
+        mensili.sort(key=lambda r: -(r[1] - r[2]))  # gli sforamenti in cima
+        larghezza = max(len(n) for n, _, _ in mensili)
+        tabella = []
+        for nome, speso, budget in mensili:
+            scarto = speso - budget
+            # Soglia proporzionale: sotto questi valori lo scostamento e' rumore,
+            # non vale un allarme.
+            rilevante = scarto > SOGLIA_EURO and scarto > budget * SOGLIA_QUOTA
+            tabella.append(f"{'⚠' if rilevante else ' '} {nome:<{larghezza}} "
+                           f"{speso:>8.2f} /{budget:>6.0f}")
+        righe.append("")
+        righe.append("<b>Budget mensili</b>")
+        righe.append("<pre>" + esc("\n".join(tabella)) + "</pre>")
+
+        tot_budget = sum(b for _, _, b in mensili)
+        tot_speso = sum(s for _, s, _ in mensili)
+        residuo = tot_budget - tot_speso
+        verbo = "residuo" if residuo >= 0 else "sforamento"
+        righe.append(f"Totale: {euro(tot_speso)} su {euro(tot_budget)} "
+                     f"({verbo} {euro(abs(residuo))})")
+
+    if annuali:
+        # Il riferimento e' la frazione di anno trascorsa alla fine del periodo
+        # in esame: un budget annuale non si confronta con un mese.
+        riferimento = min(fine, oggi)
+        giorni_anno = 366 if calendar.isleap(inizio.year) else 365
+        quota_anno = ((riferimento - inizio_anno).days + 1) / giorni_anno * 100
+
+        annuali.sort(key=lambda r: -(r[1] / r[2]))
+        larghezza = max(len(n) for n, _, _, _ in annuali)
+        tabella = []
+        for nome, speso_anno, budget, _ in annuali:
+            pct = speso_anno / budget * 100
+            rilevante = pct > quota_anno + 10
+            tabella.append(f"{'⚠' if rilevante else ' '} {nome:<{larghezza}} "
+                           f"{speso_anno:>8.2f} /{budget:>7.0f} {pct:>4.0f}%")
+        righe.append("")
+        righe.append(f"<b>Annuali</b> — anno al {quota_anno:.0f}%")
+        righe.append("<pre>" + esc("\n".join(tabella)) + "</pre>")
+        nel_mese = sum(m for _, _, _, m in annuali)
+        righe.append(f"Di cui nel mese: {euro(nel_mese)}")
 
     return "\n".join(righe)
 
