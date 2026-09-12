@@ -1,0 +1,39 @@
+name: Riepilogo spese
+
+# Nessun blocco "schedule": la programmazione la fa cron-job.org
+# chiamando workflow_dispatch (Europe/Rome, orari rispettati davvero).
+on:
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "settimanale | mensile"
+        required: true
+        default: "settimanale"
+      mese:
+        description: "solo per mensile: corrente | precedente | YYYY-MM"
+        required: false
+        default: "precedente"
+
+jobs:
+  riepilogo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - name: Genera e invia il riepilogo
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ "${{ inputs.modo }}" = "mensile" ]; then
+            python spese.py mensile "${{ inputs.mese }}"
+          else
+            python spese.py settimanale
+          fi
