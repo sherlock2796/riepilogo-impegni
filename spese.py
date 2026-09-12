@@ -29,6 +29,9 @@ import requests
 
 # ---------------------------------------------------------------- configurazione
 
+# ATTENZIONE: questi sono gli ID di *database*, quelli che vuole /v1/databases/{id}/query.
+# Non vanno confusi con gli ID di data source (collection) che Notion espone altrove:
+# con quelli l'API risponde 404, identico a quando il database non e' condiviso.
 DB_SPESE = "20270316-fc02-8148-9dad-cef4d5c96a99"        # Expenses
 DB_CATEGORIE = "20270316-fc02-81f5-ba85-eec38cd4b311"    # Expenses Catigories
 
@@ -66,6 +69,13 @@ def query_db(db_id, filtro=None):
         if cursore:
             payload["start_cursor"] = cursore
         r = requests.post(url, headers=HEADERS, json=payload, timeout=30)
+        if r.status_code == 404:
+            raise RuntimeError(
+                f"Notion risponde 404 sul database {db_id}. Due cause possibili: "
+                f"l'ID non e' quello del database (magari e' un ID di data source), "
+                f"oppure il database non e' condiviso con l'integrazione "
+                f"(••• → Connections)."
+            )
         r.raise_for_status()
         dati = r.json()
         risultati.extend(dati["results"])
@@ -107,11 +117,18 @@ def carica_spese(inizio, fine):
             "importo": props["Amount"]["number"] or 0.0,
             "data": date.fromisoformat(data["start"][:10]),
             "categoria": relazione[0]["id"] if relazione else None,
+            # None se la proprieta' non esiste ancora nel database
+            "ricorrente": props["Ricorrente"]["checkbox"] if "Ricorrente" in props else None,
         })
     return voci
 
 
 def e_ricorrente(voce):
+    """Se in Notion esiste la checkbox 'Ricorrente' comanda quella, cosi' anche
+    affitto, rata auto e abbonamenti vengono ripartiti sul mese che coprono.
+    Finche' la checkbox non c'e', si ripiega sul periodo scritto nel titolo."""
+    if voce.get("ricorrente") is not None:
+        return voce["ricorrente"]
     return bool(RICORRENTE.search(voce["titolo"]))
 
 
