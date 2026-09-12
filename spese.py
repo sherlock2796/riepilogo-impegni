@@ -29,8 +29,8 @@ import requests
 
 # ---------------------------------------------------------------- configurazione
 
-DB_SPESE = "20270316-fc02-810b-9253-000b009e9d9d"
-DB_CATEGORIE = "20270316-fc02-81b0-80bf-000b13d0a275"
+DB_SPESE = "20270316-fc02-8148-9dad-cef4d5c96a99"        # Expenses
+DB_CATEGORIE = "20270316-fc02-81f5-ba85-eec38cd4b311"    # Expenses Catigories
 
 NOTION_TOKEN = os.environ["NOTION_TOKEN"]
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
