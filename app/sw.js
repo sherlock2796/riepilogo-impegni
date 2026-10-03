@@ -3,7 +3,7 @@
 // le richieste alla stessa origine vengono servite dalla cache e aggiornate
 // in sottofondo. Le chiamate verso Supabase e i font passano dritte.
 
-const VERSIONE = "impegni-v1.0.4";
+const VERSIONE = "impegni-v1.0.5";
 const FILE = [
   "./",
   "./index.html",

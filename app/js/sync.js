@@ -49,7 +49,8 @@ export async function init() {
   }
 
   client.auth.onAuthStateChange((_evento, sessione) => {
-    impostaUtente(sessione?.user || null);
+    // Mai chiamare altre funzioni Supabase dentro questo callback: si rinvia al tick successivo.
+    setTimeout(() => impostaUtente(sessione?.user || null), 0);
   });
   const { data } = await client.auth.getSession();
   impostaUtente(data?.session?.user || null);

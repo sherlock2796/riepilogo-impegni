@@ -7,7 +7,7 @@ import { scegliFrase, saluto, BASE, MOMENTI } from "./frasi.js";
 import { descrivi as descriviRicorrenza, allineaData } from "./ricorrenze.js";
 import * as D from "./date.js";
 
-const VERSIONE_APP = "1.0.4";
+const VERSIONE_APP = "1.0.5";
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -29,7 +29,7 @@ const ui = {
   focusMostraTutti: false,
   installPrompt: null,
   login: { email: "", inviato: false, errore: "", inCorso: false, ok: "" },
-  codice: { generato: "", errore: "", inCorso: false, mostraIncolla: false },
+  codice: { generato: "", errore: "", inCorso: false, mostraIncolla: false, incollato: "" },
   frasiMomentoAperto: null,
 };
 
@@ -47,6 +47,7 @@ function avvia() {
   $("#fab").addEventListener("click", () => apriFormImpegno({ dataIniziale: ui.vista === "settimana" ? ui.giornoSelezionato : ui.oggi }));
   $("#vista").addEventListener("click", gestisciClick);
   $("#vista").addEventListener("change", gestisciChange);
+  $("#vista").addEventListener("input", (e) => { if (e.target.id === "codice-incolla") ui.codice.incollato = e.target.value; });
   $("#sheet").addEventListener("click", (e) => { if (e.target.closest("[data-chiudi-sheet]")) chiudiSheet(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") chiudiSheet(); });
   window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); ui.installPrompt = e; if (ui.vista === "impostazioni") render(); });
@@ -397,9 +398,13 @@ function vistaImpostazioni() {
         <div class="t">Hai un codice da Safari?</div>
         <div class="d">${eInstallata() ? "Sei nell'app installata: incolla qui il codice generato da Safari in Impostazioni → Sincronizzazione." : "Serve per collegare l'app installata in Home su iPhone, dove il link via email non arriva."}</div>
         ${ui.codice.mostraIncolla || eInstallata() ? `<form id="form-codice" style="margin-top:10px">
-          <div class="campo" style="margin-top:0"><textarea id="codice-incolla" rows="4" placeholder="Incolla qui il codice" style="font-size:13px;font-family:ui-monospace,monospace"></textarea></div>
+          <div class="campo" style="margin-top:0"><textarea id="codice-incolla" rows="4" placeholder="Incolla qui il codice" style="font-size:13px;font-family:ui-monospace,monospace">${h(ui.codice.incollato || "")}</textarea></div>
           ${ui.codice.errore ? `<div class="avviso ko" style="margin-top:10px">${h(ui.codice.errore)}</div>` : ""}
-          <div class="form-azioni"><button class="bottone" type="submit" ${ui.codice.inCorso ? "disabled" : ""}>${ui.codice.inCorso ? "Collego…" : "Collega con il codice"}</button></div>
+          ${ui.codice.inCorso ? `<div class="avviso ok" style="margin-top:10px">Collego… un attimo.</div>` : ""}
+          <div class="form-azioni">
+            ${navigator.clipboard?.readText ? `<button class="bottone secondario" type="button" data-azione="codice-incolla-appunti" ${ui.codice.inCorso ? "disabled" : ""}>Incolla dagli appunti</button>` : ""}
+            <button class="bottone" type="submit" ${ui.codice.inCorso ? "disabled" : ""}>${ui.codice.inCorso ? "Collego…" : "Collega con il codice"}</button>
+          </div>
         </form>` : `<div style="margin-top:10px"><button class="link" data-azione="codice-mostra-incolla">Incolla un codice</button></div>`}
       </div>`;
   } else {
@@ -471,8 +476,12 @@ function vistaImpostazioni() {
     <div class="voce"><div><div class="t">Importa</div><div class="d">Carica un file esportato in precedenza. Si somma a quello che c'è.</div></div><label class="bottone-mini" style="cursor:pointer">Scegli file<input type="file" accept="application/json,.json" id="file-importa" hidden></label></div>
     <div class="voce"><div><div class="t">Cancella tutto</div><div class="d">Svuota i dati su questo dispositivo.</div></div><button class="bottone-mini" style="color:var(--alta)" data-azione="cancella-tutto">Cancella</button></div>
   </div></section>
-  <p class="muto piccolo" style="margin-top:22px;text-align:center">Impegni ${VERSIONE_APP}</p>`;
+  <p class="muto piccolo" style="margin-top:22px;text-align:center">Impegni ${VERSIONE_APP} · ${eInstallata() ? "app installata" : "nel browser"} · sync: ${h(sync.statoSync.stato)}${sync.statoSync.messaggio ? " (" + h(sync.statoSync.messaggio) + ")" : ""}</p>`;
   return html;
+}
+
+function conTimeout(promessa, ms, messaggio) {
+  return Promise.race([promessa, new Promise((_, rifiuta) => setTimeout(() => rifiuta(new Error(messaggio)), ms))]);
 }
 
 // ============================== azioni ========================================
@@ -515,7 +524,11 @@ function gestisciClick(e) {
         .then(() => avvisa("Codice copiato. Ora incollalo nell'app installata."))
         .catch(() => { document.execCommand?.("copy"); avvisa("Codice selezionato: tieni premuto e scegli Copia."); });
     }
-    case "codice-chiudi": ui.codice = { generato: "", errore: "", inCorso: false, mostraIncolla: false }; return render();
+    case "codice-chiudi": ui.codice = { generato: "", errore: "", inCorso: false, mostraIncolla: false, incollato: "" }; return render();
+    case "codice-incolla-appunti":
+      return navigator.clipboard.readText()
+        .then((t) => { const ta = $("#codice-incolla"); if (ta) ta.value = t; ui.codice.incollato = t; if (t.trim()) $("#form-codice")?.requestSubmit(); else avvisa("Gli appunti sono vuoti: copia prima il codice da Safari.", true); })
+        .catch(() => avvisa("Non riesco a leggere gli appunti: incolla il codice a mano nel campo.", true));
     case "banner-ios-chiudi": localStorage.setItem("bannerIosVisto", "1"); return render();
     case "installa": return ui.installPrompt?.prompt().then(() => { ui.installPrompt = null; render(); });
     case "esporta": return esporta();
@@ -548,13 +561,14 @@ document.addEventListener("submit", async (e) => {
     e.preventDefault();
     const l = ui.login;
     l.email = $("#login-email").value.trim();
+    const codiceOtp = $("#login-codice")?.value.trim() || "";
     l.errore = ""; l.ok = ""; l.inCorso = true; render();
     try {
       if (!l.inviato) {
         await sync.inviaLink(l.email);
         l.inviato = true; l.ok = "Email inviata. Apri il link dal messaggio: al ritorno qui sarai collegato.";
       } else {
-        const codice = $("#login-codice").value.trim();
+        const codice = codiceOtp;
         if (!codice) throw new Error("Inserisci il codice ricevuto per email.");
         await sync.verificaCodice(l.email, codice);
         ui.login = { email: "", inviato: false, errore: "", inCorso: false, ok: "" };
@@ -568,13 +582,16 @@ document.addEventListener("submit", async (e) => {
     }
   } else if (e.target.id === "form-codice") {
     e.preventDefault();
+    const incollato = $("#codice-incolla")?.value || "";
+    ui.codice.incollato = incollato;
     ui.codice.inCorso = true; ui.codice.errore = ""; render();
     try {
-      await sync.usaCodiceCollegamento($("#codice-incolla").value);
-      ui.codice = { generato: "", errore: "", inCorso: false, mostraIncolla: false };
+      await conTimeout(sync.usaCodiceCollegamento(incollato), 20000, "Nessuna risposta dal server: controlla la connessione e riprova.");
+      ui.codice = { generato: "", errore: "", inCorso: false, mostraIncolla: false, incollato: "" };
       avvisa("Collegato! Sincronizzo i dati.");
     } catch (err) {
       ui.codice.errore = err.message || String(err);
+      avvisa(ui.codice.errore, true);
     } finally {
       ui.codice.inCorso = false; render();
     }
