@@ -7,7 +7,7 @@ import { scegliFrase, saluto, BASE, MOMENTI } from "./frasi.js";
 import { descrivi as descriviRicorrenza, allineaData } from "./ricorrenze.js";
 import * as D from "./date.js";
 
-const VERSIONE_APP = "1.0.7";
+const VERSIONE_APP = "1.0.8";
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));

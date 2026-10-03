@@ -3,7 +3,7 @@
 // le richieste alla stessa origine vengono servite dalla cache e aggiornate
 // in sottofondo. Le chiamate verso Supabase e i font passano dritte.
 
-const VERSIONE = "impegni-v1.0.7";
+const VERSIONE = "impegni-v1.0.8";
 const CACHE_ESTERNI = "impegni-esterni-v1";
 // Libreria di sincronizzazione e caratteri: messi in cache al primo uso,
 // così l'app parte anche offline (e la libreria non manca mai).
