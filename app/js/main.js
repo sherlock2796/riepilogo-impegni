@@ -7,7 +7,7 @@ import { scegliFrase, saluto, BASE, MOMENTI } from "./frasi.js";
 import { descrivi as descriviRicorrenza, allineaData } from "./ricorrenze.js";
 import * as D from "./date.js";
 
-const VERSIONE_APP = "1.0.2";
+const VERSIONE_APP = "1.0.3";
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -60,14 +60,24 @@ function avvia() {
   }, 60000);
 
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+    const avevaControllo = !!navigator.serviceWorker.controller;
+    let ricaricato = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      // Nuova versione installata: ricarico una volta così la pagina usa i file aggiornati.
+      if (avevaControllo && !ricaricato && !eFrammentoAuth()) { ricaricato = true; location.reload(); }
+    });
     navigator.serviceWorker.register("./sw.js").catch((e) => console.warn("SW non registrato", e));
   }
 }
 
+// Il link di accesso di Supabase torna qui con i token nel frammento
+// (#access_token=...). Quel frammento non va toccato finché sync.js non lo ha letto.
+const eFrammentoAuth = () => /(^|[#&?])(access_token|refresh_token|error_description|error_code|type=magiclink|code)=/.test(location.hash + location.search);
+
 function instrada() {
   const m = location.hash.match(/^#\/(oggi|settimana|statistiche|impostazioni)/);
   ui.vista = m ? m[1] : "oggi";
-  if (!m && location.hash && location.hash !== "#/") history.replaceState(null, "", "#/oggi");
+  if (!m && location.hash && location.hash !== "#/" && !eFrammentoAuth()) history.replaceState(null, "", "#/oggi");
   render();
   window.scrollTo({ top: 0 });
 }
@@ -368,6 +378,7 @@ function vistaImpostazioni() {
   } else if (!s.utente) {
     const l = ui.login;
     if (s.stato === "errore") html += `<div class="voce" style="display:block"><div class="avviso ko">Sincronizzazione non disponibile: ${h(s.messaggio || "errore di rete")}. Controlla la connessione e ricarica.</div></div>`;
+    else if (s.messaggio) html += `<div class="voce" style="display:block"><div class="avviso ko">${h(s.messaggio)}</div></div>`;
     html += `<div class="voce" style="display:block">
       <div class="t">Collega il tuo account</div>
       <div class="d">Niente password: ti arriva un'email con un link, lo apri e sei dentro.</div>

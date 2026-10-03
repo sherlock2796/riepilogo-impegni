@@ -54,8 +54,16 @@ export async function init() {
   const { data } = await client.auth.getSession();
   impostaUtente(data?.session?.user || null);
 
-  // Pulisce il frammento #access_token=... lasciato dal link magico.
-  if (location.hash.includes("access_token")) history.replaceState(null, "", location.pathname + location.search);
+  // Link scaduto o già usato: Supabase torna con #error=...&error_description=...
+  const frammento = new URLSearchParams(location.hash.replace(/^#/, ""));
+  if (frammento.get("error_description") || frammento.get("error")) {
+    const desc = frammento.get("error_description") || frammento.get("error") || "";
+    emetti({ stato: data?.session?.user ? statoSync.stato : "disconnesso", messaggio: traduci(desc.replace(/\+/g, " ")) });
+  }
+  // Pulisce il frammento lasciato dal link magico e torna alla vista Oggi.
+  if (/access_token|refresh_token|error_description|error=/.test(location.hash)) {
+    history.replaceState(null, "", location.pathname + location.search + "#/oggi");
+  }
 
   document.addEventListener("visibilitychange", () => { if (!document.hidden) sincronizza(); });
   window.addEventListener("online", () => sincronizza());
@@ -151,7 +159,7 @@ function traduci(msg = "") {
   const m = msg.toLowerCase();
   if (m.includes("rate limit") || m.includes("security purposes")) return "Troppi tentativi: aspetta qualche minuto e riprova.";
   if (m.includes("invalid") && m.includes("otp")) return "Codice non valido o scaduto.";
-  if (m.includes("expired")) return "Codice o link scaduto: richiedine uno nuovo.";
+  if (m.includes("expired") || m.includes("otp_expired")) return "Link scaduto o già usato: richiedine uno nuovo.";
   if (m.includes("already used") || m.includes("refresh token")) return "Codice già usato o non più valido: generane uno nuovo da Safari.";
   if (m.includes("invalid email")) return "Indirizzo email non valido.";
   if (m.includes("fetch")) return "Nessuna connessione.";
