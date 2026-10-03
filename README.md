@@ -52,6 +52,7 @@ app/
     date.js           utilità date
 supabase/schema.sql   tabelle, trigger e regole di sicurezza da creare su Supabase
 supabase/aggiornamento-1.sql   solo per chi aveva già creato le tabelle con la prima versione
+supabase/aggiornamento-2.sql   permessi per gli utenti collegati, se compare "permission denied"
 tests/                test unitari (node --test tests/*.test.mjs) e di regressione nel browser (node tests/e2e.mjs)
 .github/workflows/pages.yml   pubblicazione automatica su GitHub Pages
 ```
@@ -79,6 +80,8 @@ Serve una volta sola, circa dieci minuti.
    `supabase/aggiornamento-1.sql` (o di nuovo `schema.sql`): aggiunge la
    colonna `sincronizzato_il` usata come segnalibro di sincronizzazione.
    Senza, l'app mostra "Il database Supabase va aggiornato".
+   Se vedi "permission denied for table impegni", esegui
+   `supabase/aggiornamento-2.sql`: assegna i permessi agli utenti collegati.
 3. **Authentication → Providers → Email**: lascia attivo Email, disattiva
    «Confirm email» se vuoi evitare la doppia mail. Il link magico è già abilitato.
 4. **Authentication → URL Configuration**:

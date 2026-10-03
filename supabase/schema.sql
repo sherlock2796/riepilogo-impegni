@@ -67,6 +67,13 @@ create trigger chiusure_sincronizzato
 create index if not exists impegni_user_sync  on public.impegni  (user_id, sincronizzato_il);
 create index if not exists chiusure_user_sync on public.chiusure (user_id, sincronizzato_il);
 
+-- Permessi del ruolo degli utenti collegati (nei progetti recenti non sono automatici).
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on table public.impegni      to authenticated;
+grant select, insert, update, delete on table public.chiusure     to authenticated;
+grant select, insert, update, delete on table public.impostazioni to authenticated;
+grant execute on function public.tocca_sincronizzato_il() to authenticated;
+
 -- Sicurezza per riga: ognuno vede e tocca solo le proprie righe.
 alter table public.impegni      enable row level security;
 alter table public.chiusure     enable row level security;

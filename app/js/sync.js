@@ -203,6 +203,7 @@ function traduci(msg = "") {
   if (m.includes("expired") || m.includes("otp_expired")) return "Link scaduto o già usato: richiedine uno nuovo.";
   if (m.includes("already used") || m.includes("refresh token")) return "Sessione non più valida: accedi di nuovo.";
   if (m.includes("invalid email")) return "Indirizzo email non valido.";
+  if (m.includes("permission denied")) return "Permessi mancanti sul database: esegui supabase/aggiornamento-2.sql su Supabase (vedi README).";
   if (m.includes("sincronizzato_il")) return "Il database Supabase va aggiornato: esegui supabase/aggiornamento-1.sql (vedi README).";
   if (m.includes("does not exist") && m.includes("relation")) return "Tabelle mancanti su Supabase: esegui supabase/schema.sql (vedi README).";
   if (m.includes("jwt") || m.includes("session")) return "Sessione scaduta: accedi di nuovo.";
