@@ -28,7 +28,7 @@ let ascoltatoriGlobali = false;
 let creaClientPersonalizzato = null; // usato solo dai test
 const ascoltatori = new Set();
 
-export const statoSync = { stato: "non-configurato", messaggio: "", utente: null, ultimaSync: null };
+export const statoSync = { stato: "non-configurato", messaggio: "", utente: null, ultimaSync: null, recupero: false };
 
 function emetti(patch) {
   Object.assign(statoSync, patch);
@@ -85,13 +85,15 @@ async function _init() {
     return;
   }
 
-  client.auth.onAuthStateChange((_evento, sessione) => {
+  client.auth.onAuthStateChange((evento, sessione) => {
     // Mai chiamare altre funzioni Supabase dentro questo callback: si rinvia al tick successivo.
+    if (evento === "PASSWORD_RECOVERY") statoSync.recupero = true;
     setTimeout(() => impostaUtente(sessione?.user || null), 0);
   });
   const { data } = await client.auth.getSession();
   impostaUtente(data?.session?.user || null);
 
+  if (/type=recovery/.test(location.hash)) emetti({ recupero: true });
   // Link scaduto o già usato: Supabase torna con #error=...&error_description=...
   const frammento = new URLSearchParams(location.hash.replace(/^#/, ""));
   if (frammento.get("error_description") || frammento.get("error")) {
@@ -154,55 +156,52 @@ export async function esci() {
   store.aggiornaInfoSync({ utenteId: null, ultimaSyncImpegni: null, ultimaSyncChiusure: null, ultimaSyncImpostazioni: null });
 }
 
-// ---------------------- collegamento dell'app installata ----------------------
-// Su iPhone l'app aggiunta alla schermata Home non condivide la sessione con
-// Safari. Da Safari si genera un codice (la sessione corrente, codificata) e
-// lo si incolla nell'app installata. I token di aggiornamento di Supabase
-// ruotano e non possono essere usati da due parti: chi genera il codice
-// viene scollegato in locale, così non prova a riusarli.
+// ------------------------------- password ------------------------------------
+// L'accesso con password funziona ovunque, anche nell'app installata su iPhone
+// (dove il link via email non può arrivare). La password si imposta da collegati.
 
-export function codificaCodice(sessione) {
-  const json = JSON.stringify({ a: sessione.access_token, r: sessione.refresh_token });
-  return btoa(unescape(encodeURIComponent(json))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-export function decodificaCodice(codice) {
-  const pulito = String(codice || "").replace(/\s+/g, "");
-  if (!pulito) throw new Error("Incolla il codice.");
-  try {
-    const b64 = pulito.replace(/-/g, "+").replace(/_/g, "/");
-    const dati = JSON.parse(decodeURIComponent(escape(atob(b64))));
-    if (!dati.a || !dati.r) throw new Error();
-    return { access_token: dati.a, refresh_token: dati.r };
-  } catch {
-    throw new Error("Codice non valido: copialo per intero.");
-  }
-}
-
-export async function creaCodiceCollegamento() {
+export async function accediConPassword(email, password) {
   if (!client) throw new Error("Sincronizzazione non disponibile: controlla la connessione.");
-  const { data } = await client.auth.getSession();
-  if (!data?.session) throw new Error("Non sei collegato.");
-  const codice = codificaCodice(data.session);
-  await client.auth.signOut({ scope: "local" });
-  return codice;
+  const { error } = await client.auth.signInWithPassword({ email: email.trim(), password });
+  if (error) throw new Error(traduci(error.message));
 }
 
-export async function usaCodiceCollegamento(codice) {
+/** Crea un account con password. Ritorna { confermaRichiesta } se manca ancora la conferma email. */
+export async function registraConPassword(email, password) {
   if (!client) throw new Error("Sincronizzazione non disponibile: controlla la connessione.");
-  const tokens = decodificaCodice(codice);
-  const r1 = await client.auth.setSession(tokens);
-  if (r1.error) throw new Error(traduci(r1.error.message));
-  const r2 = await client.auth.refreshSession();
-  if (r2.error) throw new Error(traduci(r2.error.message));
+  const { data, error } = await client.auth.signUp({
+    email: email.trim(), password,
+    options: { emailRedirectTo: location.origin + location.pathname },
+  });
+  if (error) throw new Error(traduci(error.message));
+  return { confermaRichiesta: !data?.session };
+}
+
+export async function impostaPassword(nuova) {
+  if (!client) throw new Error("Sincronizzazione non disponibile: controlla la connessione.");
+  if (!nuova || nuova.length < 8) throw new Error("La password deve avere almeno 8 caratteri.");
+  const { error } = await client.auth.updateUser({ password: nuova });
+  if (error) throw new Error(traduci(error.message));
+}
+
+export async function inviaRecupero(email) {
+  if (!client) throw new Error("Sincronizzazione non disponibile: controlla la connessione.");
+  const { error } = await client.auth.resetPasswordForEmail(email.trim(), { redirectTo: location.origin + location.pathname });
+  if (error) throw new Error(traduci(error.message));
 }
 
 function traduci(msg = "") {
   const m = String(msg).toLowerCase();
   if (m.includes("rate limit") || m.includes("security purposes")) return "Troppi tentativi: aspetta qualche minuto e riprova.";
+  if (m.includes("invalid login credentials") || m.includes("invalid_credentials")) return "Email o password non corretti.";
+  if (m.includes("email not confirmed")) return "Email non ancora confermata: apri il link ricevuto per email.";
+  if (m.includes("user already registered") || m.includes("already been registered")) return "Esiste già un account con questa email: accedi con la password, oppure entra con il link via email e impostala dalle Impostazioni.";
+  if (m.includes("password should be") || m.includes("weak password") || m.includes("password is too")) return "Password troppo corta o troppo debole: usane una di almeno 8 caratteri.";
+  if (m.includes("same password") || m.includes("different from the old")) return "La nuova password deve essere diversa da quella attuale.";
+  if (m.includes("signups not allowed") || m.includes("signup is disabled")) return "Le registrazioni sono disattivate su Supabase (Authentication → Providers → Email).";
   if (m.includes("invalid") && m.includes("otp")) return "Codice non valido o scaduto.";
   if (m.includes("expired") || m.includes("otp_expired")) return "Link scaduto o già usato: richiedine uno nuovo.";
-  if (m.includes("already used") || m.includes("refresh token")) return "Codice già usato o non più valido: generane uno nuovo da Safari.";
+  if (m.includes("already used") || m.includes("refresh token")) return "Sessione non più valida: accedi di nuovo.";
   if (m.includes("invalid email")) return "Indirizzo email non valido.";
   if (m.includes("sincronizzato_il")) return "Il database Supabase va aggiornato: esegui supabase/aggiornamento-1.sql (vedi README).";
   if (m.includes("does not exist") && m.includes("relation")) return "Tabelle mancanti su Supabase: esegui supabase/schema.sql (vedi README).";
@@ -346,6 +345,6 @@ export function _usaClientPerTest(f) { creaClientPersonalizzato = f; }
 export function _resetPerTest() {
   clearInterval(timer);
   client = null; utente = null; timer = null; promessaInit = null; promessaSync = null; richiestaInCoda = false;
-  Object.assign(statoSync, { stato: "non-configurato", messaggio: "", utente: null, ultimaSync: null });
+  Object.assign(statoSync, { stato: "non-configurato", messaggio: "", utente: null, ultimaSync: null, recupero: false });
 }
 export function _attendiSync() { return promessaSync || Promise.resolve(); }

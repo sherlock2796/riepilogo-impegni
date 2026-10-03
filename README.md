@@ -109,7 +109,20 @@ Serve una volta sola, circa dieci minuti.
    La chiave anon è fatta per stare nel browser: i dati sono protetti dalle
    regole per riga create al punto 2.
 7. Fai commit e push: alla pubblicazione successiva l'app mostrerà in
-   **Impostazioni → Sincronizzazione** il campo per l'email.
+   **Impostazioni → Sincronizzazione** il modulo di accesso.
+
+### Come si accede
+
+- **Email e password** è la via normale: funziona nel browser e nell'app
+  installata, su qualunque dispositivo.
+- La prima volta non hai ancora una password: usa **"Accedi con il link via
+  email"**, apri il link (su iPhone si apre in Safari), poi in
+  **Impostazioni → Password** salvane una. Da lì in poi usi email e password
+  ovunque, app installata compresa.
+- **Password dimenticata** manda un link di recupero: aprilo e salva una
+  nuova password dalle Impostazioni.
+- "Crea account" compare se email e password non corrispondono a nessun
+  utente: serve solo per un indirizzo nuovo.
 
 Dopo il primo accesso su un dispositivo tutto il locale viene caricato sul
 server; sugli altri dispositivi basta accedere con la stessa email. Offline
@@ -118,19 +131,10 @@ di modifica dello stesso impegno da due parti, vince l'ultima salvata.
 
 ### App installata su iPhone
 
-Su iPhone l'app aggiunta alla schermata Home ha una memoria separata da
-Safari: il link di accesso apre Safari e il collegamento resta lì. Per
-portarlo nell'app installata:
-
-1. In Safari fai l'accesso con il link via email.
-2. Sempre in Safari, **Impostazioni → Sincronizzazione → Collega l'app
-   installata → Genera codice**, poi **Copia il codice**. Safari viene
-   scollegato (i token di Supabase non possono essere usati da due parti).
-3. Apri l'app installata, **Impostazioni → Sincronizzazione → Hai un codice
-   da Safari?**, incolla e conferma.
-
-Si fa una volta sola per dispositivo. Su Android non serve: l'app installata
-da Chrome condivide già l'accesso con Chrome.
+L'app aggiunta alla schermata Home ha una memoria separata da Safari, quindi
+il link via email non può collegarla direttamente: dentro l'app usa email e
+password. Su Android non serve nemmeno quello, l'app installata da Chrome
+condivide già l'accesso con Chrome.
 
 Limite del piano gratuito da sapere: Supabase invia poche email di accesso
 all'ora (3-4). La sessione però resta valida a lungo, quindi si accede

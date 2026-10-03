@@ -239,7 +239,14 @@ const idPerTitolo = (p, t) => p.$eval(`#vista .riga:has(.titolo:text-is("${t}"))
   const configurato = await p.evaluate(() => !!(window.CONFIG && window.CONFIG.supabaseUrl));
   const testoImp = await p.textContent("#vista");
   controlla("impostazioni: sezione sincronizzazione coerente con config.js",
-    configurato ? testoImp.includes("Collega il tuo account") : testoImp.includes("Solo su questo dispositivo"));
+    configurato ? testoImp.includes("Email e password") : testoImp.includes("Solo su questo dispositivo"));
+  if (configurato) {
+    controlla("impostazioni: modulo password presente", (await p.$("#form-password #pw-email")) !== null && (await p.$("#form-password #pw-password")) !== null);
+    await p.click("[data-azione=login-mostra-link]");
+    controlla("impostazioni: 'Accedi con il link' mostra il secondo modulo", (await p.$("#form-login #login-email")) !== null);
+    await p.click("[data-azione=login-mostra-link]");
+    controlla("impostazioni: e lo nasconde", (await p.$("#form-login")) === null);
+  }
   await p.click("[data-azione=toggle][data-chiave=modalitaFocus]");
   await dormi(150);
   controlla("impostazioni: interruttore focus acceso", await p.$eval("[data-chiave=modalitaFocus]", (e) => e.classList.contains("on")));

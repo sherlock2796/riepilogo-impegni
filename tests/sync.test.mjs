@@ -35,6 +35,7 @@ function creaServer() {
   const adesso = () => new Date(tick++).toISOString();
   const chiave = (t, r) => (t === "impegni" ? r.id : t === "chiusure" ? `${r.user_id}|${r.data}` : r.user_id);
   const revocati = new Set();
+  const utenti = new Map(); // email -> password
 
   class Query {
     constructor(t) { this.t = t; this.filtri = []; this.ord = null; this.lim = Infinity; this.single = false; }
@@ -83,6 +84,23 @@ function creaServer() {
       },
       async signOut() { this.sessione = null; this._notifica("SIGNED_OUT"); return { error: null }; },
       async signInWithOtp({ email }) { this.ultimaOtp = email; return { error: null }; },
+      async signInWithPassword({ email, password }) {
+        if (!utenti.has(email) || utenti.get(email) !== password) return { data: {}, error: { message: "Invalid login credentials" } };
+        this._accedi(email);
+        return { data: { session: this.sessione }, error: null };
+      },
+      async signUp({ email, password }) {
+        if (utenti.has(email)) return { data: { user: { id: "uid-" + email }, session: null }, error: null }; // utente fittizio, come Supabase con conferma attiva
+        utenti.set(email, password);
+        this._accedi(email);
+        return { data: { session: this.sessione }, error: null };
+      },
+      async updateUser({ password }) {
+        if (!this.sessione) return { data: {}, error: { message: "Auth session missing!" } };
+        utenti.set(this.sessione.user.email, password);
+        return { data: { user: this.sessione.user }, error: null };
+      },
+      async resetPasswordForEmail() { return { data: {}, error: null }; },
       async verifyOtp() { return { error: null }; },
       async setSession({ access_token, refresh_token }) {
         if (revocati.has(refresh_token)) return { data: {}, error: { message: "Invalid Refresh Token: Already Used" } };
@@ -244,32 +262,33 @@ test("database non aggiornato: messaggio chiaro", async () => {
   assert.match(sync.statoSync.messaggio, /schema\.sql/);
 });
 
-test("collegamento con codice: chi genera esce, chi incolla entra; il codice vale una volta sola", async () => {
+test("password: errore, registrazione, impostazione e accesso da un altro dispositivo", async () => {
   const server = creaServer();
-  const S = await usaDispositivo("Safari", server);
-  await accedi(S, "leo@test.it");
-  store.crea({ titolo: "Da Safari", data: OGGI });
+  const A = await usaDispositivo("P1", server);
+  await assert.rejects(() => sync.accediConPassword("nuovo@test.it", "segreta1"), /non corretti/);
+  const reg = await sync.registraConPassword("nuovo@test.it", "segreta1");
+  assert.equal(reg.confermaRichiesta, false);
+  await dormi(5); await sync._attendiSync();
+  assert.equal(sync.statoSync.stato, "collegato");
+  store.crea({ titolo: "Con password", data: OGGI });
   await sync.sincronizza();
 
-  const codice = await sync.creaCodiceCollegamento();
-  assert.ok(codice.length > 10);
-  await dormi(5);
-  assert.equal(sync.statoSync.stato, "disconnesso", "Safari viene scollegato in locale");
-  assert.equal(S.auth.sessione, null);
+  // registrarsi di nuovo con la stessa email non imposta la password (comportamento Supabase)
+  const reg2 = await sync.registraConPassword("nuovo@test.it", "altra1234");
+  assert.equal(reg2.confermaRichiesta, true);
 
-  await usaDispositivo("AppInstallata", server);
-  assert.equal(store.tutti().length, 0);
-  await sync.usaCodiceCollegamento(codice);
-  await dormi(5);
-  await sync._attendiSync();
-  assert.equal(sync.statoSync.stato, "collegato");
-  assert.equal(sync.statoSync.utente.email, "leo@test.it");
-  assert.equal(store.tutti()[0].titolo, "Da Safari");
+  // cambio password da collegati
+  await assert.rejects(() => sync.impostaPassword("corta"), /almeno 8/);
+  await sync.impostaPassword("nuovissima8");
 
-  await usaDispositivo("Altro", server);
-  await assert.rejects(() => sync.usaCodiceCollegamento(codice), /già usato/);
-  await assert.rejects(() => sync.usaCodiceCollegamento("abc"), /non valido/);
-  await assert.rejects(() => sync.usaCodiceCollegamento("   "), /Incolla/);
+  // altro dispositivo: entra con la nuova password e scarica tutto
+  await usaDispositivo("P2", server);
+  await assert.rejects(() => sync.accediConPassword("nuovo@test.it", "segreta1"), /non corretti/);
+  await sync.accediConPassword("nuovo@test.it", "nuovissima8");
+  await dormi(5); await sync._attendiSync();
+  assert.equal(store.tutti()[0].titolo, "Con password");
+  await assert.doesNotReject(() => sync.inviaRecupero("nuovo@test.it"));
+  void A;
 });
 
 test("esci: solo locale, i dati restano e al rientro si riallinea", async () => {

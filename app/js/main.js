@@ -7,7 +7,7 @@ import { scegliFrase, saluto, BASE, MOMENTI } from "./frasi.js";
 import { descrivi as descriviRicorrenza, allineaData } from "./ricorrenze.js";
 import * as D from "./date.js";
 
-const VERSIONE_APP = "1.0.6";
+const VERSIONE_APP = "1.0.7";
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -28,8 +28,7 @@ const ui = {
   giornoSelezionato: oggi(),
   focusMostraTutti: false,
   installPrompt: null,
-  login: { email: "", inviato: false, errore: "", inCorso: false, ok: "" },
-  codice: { generato: "", errore: "", inCorso: false, mostraIncolla: false, incollato: "" },
+  login: { email: "", inviato: false, errore: "", inCorso: false, ok: "", mostraLink: false, offriRegistrazione: false },
   frasiMomentoAperto: null,
 };
 
@@ -47,7 +46,6 @@ function avvia() {
   $("#fab").addEventListener("click", () => apriFormImpegno({ dataIniziale: ui.vista === "settimana" ? ui.giornoSelezionato : ui.oggi }));
   $("#vista").addEventListener("click", gestisciClick);
   $("#vista").addEventListener("change", gestisciChange);
-  $("#vista").addEventListener("input", (e) => { if (e.target.id === "codice-incolla") ui.codice.incollato = e.target.value; });
   $("#vista").addEventListener("toggle", (e) => {
     const d = e.target;
     if (d.matches?.("details[data-momento]")) ui.frasiMomentoAperto = d.open ? d.dataset.momento : null;
@@ -196,8 +194,6 @@ function vistaOggi() {
 
   if (sync.configurato() && sync.statoSync.stato === "disconnesso") {
     html += `<div class="avviso banner-sync"><span>Non sei collegato: i dati restano su questo dispositivo.</span><a class="link" href="#/impostazioni">Collega</a></div>`;
-  } else if (sync.statoSync.utente && eIOS() && !eInstallata() && !localStorage.getItem("bannerIosVisto")) {
-    html += `<div class="avviso banner-sync"><span>Usi l'app installata in Home? Da Impostazioni puoi generare il codice per collegarla.</span><span style="display:flex;gap:12px;flex:none"><a class="link" href="#/impostazioni">Vai</a><button class="link muto" data-azione="banner-ios-chiudi">Chiudi</button></span></div>`;
   }
 
   if (arr.length) {
@@ -369,15 +365,7 @@ function vistaImpostazioni() {
 
   // --- sincronizzazione
   html += `<section class="sezione" style="margin-top:0"><div class="intestazione"><h2>Sincronizzazione</h2></div><div class="carta">`;
-  if (ui.codice.generato && s.stato !== "non-configurato") {
-    html += `<div class="voce" style="display:block">
-      <div class="t">Codice per l'app installata</div>
-      <div class="d">Questo browser è stato scollegato. Copia il codice e incollalo nell'app installata in Impostazioni → Sincronizzazione.</div>
-      <div class="campo"><textarea id="codice-generato" rows="5" readonly style="font-size:13px;font-family:ui-monospace,monospace">${h(ui.codice.generato)}</textarea></div>
-      <div class="form-azioni"><button class="bottone" data-azione="codice-copia">Copia il codice</button><button class="bottone secondario" data-azione="codice-chiudi">Fatto</button></div>
-      <p class="muto piccolo" style="margin-top:10px">Il codice vale come la tua sessione: non condividerlo e usalo entro poco.</p>
-    </div>`;
-  } else if (s.stato === "non-configurato") {
+  if (s.stato === "non-configurato") {
     html += `<div class="voce" style="display:block"><div class="t">Solo su questo dispositivo</div>
       <div class="d">La sincronizzazione tra telefono e computer non è ancora configurata. Le istruzioni sono nel file README del progetto (sezione Supabase): servono due valori in <code>config.js</code>.</div></div>`;
   } else if (!s.utente) {
@@ -385,48 +373,52 @@ function vistaImpostazioni() {
     if (s.stato === "errore") html += `<div class="voce" style="display:block"><div class="avviso ko">Sincronizzazione non disponibile: ${h(s.messaggio || "errore di rete")}. Controlla la connessione e ricarica.</div></div>`;
     else if (s.messaggio) html += `<div class="voce" style="display:block"><div class="avviso ko">${h(s.messaggio)}</div></div>`;
     html += `<div class="voce" style="display:block">
-      <div class="t">Collega il tuo account</div>
-      <div class="d">Niente password: ti arriva un'email con un link, lo apri e sei dentro.</div>
-      <form id="form-login" style="margin-top:12px">
-        <div class="campo" style="margin-top:0"><label for="login-email">Email</label><input type="email" id="login-email" required autocomplete="email" inputmode="email" value="${h(l.email)}" placeholder="tu@esempio.it" ${l.inviato ? "readonly" : ""}></div>
-        ${l.inviato ? `<div class="campo"><label for="login-codice">Se l'email contiene anche un codice, incollalo qui (facoltativo)</label><input type="text" id="login-codice" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" maxlength="8"></div>` : ""}
-        ${l.errore ? `<div class="avviso ko" style="margin-top:12px">${h(l.errore)}</div>` : ""}
-        ${l.ok ? `<div class="avviso ok" style="margin-top:12px">${h(l.ok)}</div>` : ""}
+      <div class="t">Accedi</div>
+      <div class="d">Email e password: funziona ovunque, anche nell'app installata. Se non hai ancora una password, entra una volta con il link via email e impostala qui nelle Impostazioni.</div>
+      <form id="form-password" style="margin-top:12px">
+        <div class="campo" style="margin-top:0"><label for="pw-email">Email</label><input type="email" id="pw-email" required autocomplete="username" inputmode="email" value="${h(l.email)}" placeholder="tu@esempio.it"></div>
+        <div class="campo"><label for="pw-password">Password</label><input type="password" id="pw-password" required autocomplete="current-password" minlength="6" placeholder="La tua password"></div>
+        ${l.errore && !l.mostraLink ? `<div class="avviso ko" style="margin-top:12px">${h(l.errore)}</div>` : ""}
+        ${l.ok && !l.mostraLink ? `<div class="avviso ok" style="margin-top:12px">${h(l.ok)}</div>` : ""}
         <div class="form-azioni">
-          ${l.inviato
-            ? `<button class="bottone" type="submit" ${l.inCorso ? "disabled" : ""}>Conferma codice</button><button class="bottone secondario" type="button" data-azione="login-reset">Cambia email</button>`
-            : `<button class="bottone" type="submit" ${l.inCorso ? "disabled" : ""}>${l.inCorso ? "Invio…" : "Inviami il link"}</button>`}
+          <button class="bottone" type="submit" ${l.inCorso ? "disabled" : ""}>${l.inCorso ? "Accedo…" : "Accedi"}</button>
+          ${l.offriRegistrazione ? `<button class="bottone secondario" type="button" data-azione="registra" ${l.inCorso ? "disabled" : ""}>Crea account</button>` : ""}
         </div>
-      </form></div>
-      <div class="voce" style="display:block">
-        <div class="t">Hai un codice da Safari?</div>
-        <div class="d">${eInstallata() ? "Sei nell'app installata: incolla qui il codice generato da Safari in Impostazioni → Sincronizzazione." : "Serve per collegare l'app installata in Home su iPhone, dove il link via email non arriva."}</div>
-        ${ui.codice.mostraIncolla || eInstallata() ? `<form id="form-codice" style="margin-top:10px">
-          <div class="campo" style="margin-top:0"><textarea id="codice-incolla" rows="4" placeholder="Incolla qui il codice" style="font-size:13px;font-family:ui-monospace,monospace">${h(ui.codice.incollato || "")}</textarea></div>
-          ${ui.codice.errore ? `<div class="avviso ko" style="margin-top:10px">${h(ui.codice.errore)}</div>` : ""}
-          ${ui.codice.inCorso ? `<div class="avviso ok" style="margin-top:10px">Collego… un attimo.</div>` : ""}
+        <div style="margin-top:14px;display:flex;flex-wrap:wrap;gap:8px 18px">
+          <button class="link" type="button" data-azione="login-mostra-link">${l.mostraLink ? "Nascondi l'accesso con link" : "Non hai una password? Accedi con il link via email"}</button>
+          <button class="link" type="button" data-azione="password-dimenticata" ${l.inCorso ? "disabled" : ""}>Password dimenticata</button>
+        </div>
+      </form></div>`;
+    if (l.mostraLink) {
+      html += `<div class="voce" style="display:block">
+        <div class="t">Accesso con link via email</div>
+        <div class="d">Ti arriva un'email con un link: aprilo e sei dentro. Su iPhone il link si apre in Safari, non nell'app installata: da lì imposta una password e poi usala nell'app.</div>
+        <form id="form-login" style="margin-top:12px">
+          <div class="campo" style="margin-top:0"><label for="login-email">Email</label><input type="email" id="login-email" required autocomplete="email" inputmode="email" value="${h(l.email)}" placeholder="tu@esempio.it" ${l.inviato ? "readonly" : ""}></div>
+          ${l.inviato ? `<div class="campo"><label for="login-codice">Se l'email contiene anche un codice, incollalo qui (facoltativo)</label><input type="text" id="login-codice" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" maxlength="8"></div>` : ""}
+          ${l.errore ? `<div class="avviso ko" style="margin-top:12px">${h(l.errore)}</div>` : ""}
+          ${l.ok ? `<div class="avviso ok" style="margin-top:12px">${h(l.ok)}</div>` : ""}
           <div class="form-azioni">
-            ${navigator.clipboard?.readText ? `<button class="bottone secondario" type="button" data-azione="codice-incolla-appunti" ${ui.codice.inCorso ? "disabled" : ""}>Incolla dagli appunti</button>` : ""}
-            <button class="bottone" type="submit" ${ui.codice.inCorso ? "disabled" : ""}>${ui.codice.inCorso ? "Collego…" : "Collega con il codice"}</button>
+            ${l.inviato
+              ? `<button class="bottone" type="submit" ${l.inCorso ? "disabled" : ""}>Conferma codice</button><button class="bottone secondario" type="button" data-azione="login-reset">Cambia email</button>`
+              : `<button class="bottone" type="submit" ${l.inCorso ? "disabled" : ""}>${l.inCorso ? "Invio…" : "Inviami il link"}</button>`}
           </div>
-        </form>` : `<div style="margin-top:10px"><button class="link" data-azione="codice-mostra-incolla">Incolla un codice</button></div>`}
-      </div>`;
+        </form></div>`;
+    }
   } else {
     html += `<div class="voce"><div><div class="t">${h(s.utente?.email || "")}</div><div class="d">${s.stato === "errore" ? "Errore: " + h(s.messaggio) : s.stato === "offline" ? "Offline: sincronizzo appena torna la rete" : s.ultimaSync ? "Ultima sincronizzazione alle " + D.oraAdesso(new Date(s.ultimaSync)) : "Collegato"}</div></div>
-      <button class="bottone-mini" data-azione="sync-ora">Sincronizza ora</button></div>
+      <button class="bottone-mini" data-azione="sync-ora">Sincronizza ora</button></div>`;
+    if (s.recupero) html += `<div class="voce" style="display:block"><div class="avviso ok">Sei entrato con il link di recupero: imposta ora la nuova password qui sotto.</div></div>`;
+    html += `<div class="voce" style="display:block">
+      <div class="t">Password</div>
+      <div class="d">Imposta o cambia la password: così accedi da qualunque dispositivo, app installata compresa, senza passare dall'email.</div>
+      <form id="form-nuova-password" style="margin-top:10px">
+        <div class="campo" style="margin-top:0"><label for="nuova-password">Nuova password (almeno 8 caratteri)</label><input type="password" id="nuova-password" required minlength="8" autocomplete="new-password" placeholder="Nuova password"></div>
+        ${ui.login.errore ? `<div class="avviso ko" style="margin-top:12px">${h(ui.login.errore)}</div>` : ""}
+        ${ui.login.ok ? `<div class="avviso ok" style="margin-top:12px">${h(ui.login.ok)}</div>` : ""}
+        <div class="form-azioni"><button class="bottone secondario" type="submit" ${ui.login.inCorso ? "disabled" : ""}>${ui.login.inCorso ? "Salvo…" : "Salva password"}</button></div>
+      </form></div>
       <div class="voce"><div><div class="t">Esci da questo dispositivo</div><div class="d">Gli altri dispositivi restano collegati. I dati restano sia qui sia sul server.</div></div><button class="bottone-mini" data-azione="esci">Esci</button></div>`;
-    if (!eInstallata()) {
-      html += `<div class="voce" style="display:block">
-        <div class="t">Collega l'app installata (iPhone)</div>
-        <div class="d">Il link via email apre Safari, ma l'app aggiunta alla schermata Home non vede quell'accesso. Genera un codice qui, copialo e incollalo nell'app installata in Impostazioni → Sincronizzazione. Attenzione: questo browser verrà scollegato, continuerai dall'app installata.</div>
-        ${ui.codice.generato ? `
-          <div class="campo"><textarea id="codice-generato" rows="5" readonly style="font-size:13px;font-family:ui-monospace,monospace">${h(ui.codice.generato)}</textarea></div>
-          <div class="form-azioni"><button class="bottone" data-azione="codice-copia">Copia il codice</button></div>
-          <p class="muto piccolo" style="margin-top:10px">Ora apri l'app installata, vai in Impostazioni → Sincronizzazione e incolla il codice. Il codice vale come la tua sessione: non condividerlo e usalo entro poco.</p>`
-        : `${ui.codice.errore ? `<div class="avviso ko" style="margin-top:10px">${h(ui.codice.errore)}</div>` : ""}
-          <div style="margin-top:10px"><button class="bottone secondario" data-azione="codice-genera" ${ui.codice.inCorso ? "disabled" : ""}>Genera codice</button></div>`}
-      </div>`;
-    }
   }
   html += `</div></section>`;
 
@@ -512,28 +504,11 @@ function gestisciClick(e) {
     case "seleziona-giorno": ui.giornoSelezionato = el.dataset.data; return render();
     case "toggle": { const k = el.dataset.chiave; store.aggiornaImpostazioni({ [k]: !store.impostazioni()[k] }); return; }
     case "sync-ora": return sync.sincronizza();
-    case "esci": return sync.esci().then(() => avvisa("Sei uscito. I dati restano qui."));
-    case "login-reset": ui.login = { email: ui.login.email, inviato: false, errore: "", inCorso: false, ok: "" }; return render();
-    case "codice-mostra-incolla": ui.codice.mostraIncolla = true; render(); return $("#codice-incolla")?.focus();
-    case "codice-genera":
-      ui.codice.inCorso = true; ui.codice.errore = ""; render();
-      return sync.creaCodiceCollegamento()
-        .then((c) => { ui.codice.generato = c; })
-        .catch((err) => { ui.codice.errore = err.message || String(err); })
-        .finally(() => { ui.codice.inCorso = false; render(); });
-    case "codice-copia": {
-      const ta = $("#codice-generato");
-      ta?.select();
-      return navigator.clipboard?.writeText(ui.codice.generato)
-        .then(() => avvisa("Codice copiato. Ora incollalo nell'app installata."))
-        .catch(() => { document.execCommand?.("copy"); avvisa("Codice selezionato: tieni premuto e scegli Copia."); });
-    }
-    case "codice-chiudi": ui.codice = { generato: "", errore: "", inCorso: false, mostraIncolla: false, incollato: "" }; return render();
-    case "codice-incolla-appunti":
-      return navigator.clipboard.readText()
-        .then((t) => { const ta = $("#codice-incolla"); if (ta) ta.value = t; ui.codice.incollato = t; if (t.trim()) $("#form-codice")?.requestSubmit(); else avvisa("Gli appunti sono vuoti: copia prima il codice da Safari.", true); })
-        .catch(() => avvisa("Non riesco a leggere gli appunti: incolla il codice a mano nel campo.", true));
-    case "banner-ios-chiudi": localStorage.setItem("bannerIosVisto", "1"); return render();
+    case "esci": ui.login = { ...ui.login, errore: "", ok: "", offriRegistrazione: false }; return sync.esci().then(() => avvisa("Sei uscito. I dati restano qui."));
+    case "login-reset": ui.login = { ...ui.login, inviato: false, errore: "", inCorso: false, ok: "" }; return render();
+    case "login-mostra-link": ui.login.mostraLink = !ui.login.mostraLink; ui.login.errore = ""; ui.login.ok = ""; render(); return $("#login-email")?.focus();
+    case "registra": return registra();
+    case "password-dimenticata": return passwordDimenticata();
     case "installa": return ui.installPrompt?.prompt().then(() => { ui.installPrompt = null; render(); });
     case "esporta": return esporta();
     case "cancella-tutto":
@@ -561,7 +536,23 @@ function gestisciChange(e) {
 }
 
 document.addEventListener("submit", async (e) => {
-  if (e.target.id === "form-login") {
+  if (e.target.id === "form-password") {
+    e.preventDefault();
+    const l = ui.login;
+    l.email = $("#pw-email").value.trim();
+    const password = $("#pw-password").value;
+    l.errore = ""; l.ok = ""; l.inCorso = true; l.offriRegistrazione = false; render();
+    try {
+      await conTimeout(sync.accediConPassword(l.email, password), 20000, "Nessuna risposta dal server: controlla la connessione e riprova.");
+      ui.login = { ...ui.login, errore: "", ok: "", inCorso: false };
+      avvisa("Collegato! Sincronizzo i dati.");
+    } catch (err) {
+      l.errore = err.message || String(err);
+      if (/non corretti/.test(l.errore)) l.offriRegistrazione = true;
+    } finally {
+      l.inCorso = false; render();
+    }
+  } else if (e.target.id === "form-login") {
     e.preventDefault();
     const l = ui.login;
     l.email = $("#login-email").value.trim();
@@ -572,10 +563,9 @@ document.addEventListener("submit", async (e) => {
         await sync.inviaLink(l.email);
         l.inviato = true; l.ok = "Email inviata. Apri il link dal messaggio: al ritorno qui sarai collegato.";
       } else {
-        const codice = codiceOtp;
-        if (!codice) throw new Error("Inserisci il codice ricevuto per email.");
-        await sync.verificaCodice(l.email, codice);
-        ui.login = { email: "", inviato: false, errore: "", inCorso: false, ok: "" };
+        if (!codiceOtp) throw new Error("Inserisci il codice ricevuto per email.");
+        await sync.verificaCodice(l.email, codiceOtp);
+        ui.login = { ...ui.login, inviato: false, errore: "", inCorso: false, ok: "", mostraLink: false };
         avvisa("Collegato! Sincronizzo i dati.");
       }
     } catch (err) {
@@ -584,20 +574,20 @@ document.addEventListener("submit", async (e) => {
       l.inCorso = false; render();
       const c = $("#login-codice"); if (c) c.focus();
     }
-  } else if (e.target.id === "form-codice") {
+  } else if (e.target.id === "form-nuova-password") {
     e.preventDefault();
-    const incollato = $("#codice-incolla")?.value || "";
-    ui.codice.incollato = incollato;
-    ui.codice.inCorso = true; ui.codice.errore = ""; render();
+    const nuova = $("#nuova-password").value;
+    const l = ui.login;
+    l.errore = ""; l.ok = ""; l.inCorso = true; render();
     try {
-      await conTimeout(sync.usaCodiceCollegamento(incollato), 20000, "Nessuna risposta dal server: controlla la connessione e riprova.");
-      ui.codice = { generato: "", errore: "", inCorso: false, mostraIncolla: false, incollato: "" };
-      avvisa("Collegato! Sincronizzo i dati.");
+      await conTimeout(sync.impostaPassword(nuova), 20000, "Nessuna risposta dal server: controlla la connessione e riprova.");
+      sync.statoSync.recupero = false;
+      l.ok = "Password salvata. Da ora puoi accedere con email e password su ogni dispositivo.";
+      avvisa("Password salvata.");
     } catch (err) {
-      ui.codice.errore = err.message || String(err);
-      avvisa(ui.codice.errore, true);
+      l.errore = err.message || String(err);
     } finally {
-      ui.codice.inCorso = false; render();
+      l.inCorso = false; render();
     }
   } else if (e.target.id === "form-frase") {
     e.preventDefault();
@@ -608,6 +598,42 @@ document.addEventListener("submit", async (e) => {
     avvisa("Frase aggiunta. Ottimo gusto.");
   }
 });
+
+async function registra() {
+  const l = ui.login;
+  l.email = $("#pw-email")?.value.trim() || l.email;
+  const password = $("#pw-password")?.value || "";
+  if (!l.email || password.length < 6) { l.errore = "Inserisci email e una password di almeno 6 caratteri."; return render(); }
+  l.errore = ""; l.ok = ""; l.inCorso = true; render();
+  try {
+    const r = await sync.registraConPassword(l.email, password);
+    l.offriRegistrazione = false;
+    if (r.confermaRichiesta) {
+      l.ok = "Se l'indirizzo è nuovo, ti è arrivata un'email di conferma: aprila e poi accedi qui con la password. Se invece avevi già usato il link via email, la password non si imposta così: entra con il link e salvala dalle Impostazioni.";
+    } else {
+      avvisa("Account creato e collegato!");
+    }
+  } catch (err) {
+    l.errore = err.message || String(err);
+  } finally {
+    l.inCorso = false; render();
+  }
+}
+
+async function passwordDimenticata() {
+  const l = ui.login;
+  l.email = $("#pw-email")?.value.trim() || l.email;
+  if (!l.email) { l.errore = "Scrivi prima la tua email."; return render(); }
+  l.errore = ""; l.ok = ""; l.inCorso = true; render();
+  try {
+    await sync.inviaRecupero(l.email);
+    l.ok = "Email inviata: apri il link, verrai collegato e potrai impostare una nuova password dalle Impostazioni.";
+  } catch (err) {
+    l.errore = err.message || String(err);
+  } finally {
+    l.inCorso = false; render();
+  }
+}
 
 function spunta(id) {
   const i = store.perId(id);
