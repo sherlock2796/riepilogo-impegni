@@ -2,7 +2,7 @@
 // L'app è "local-first": tutto funziona senza rete; la sincronizzazione
 // (sync.js) legge e scrive qui, marcando ciò che va spinto sul server.
 
-import { oggiISO, aggiungiGiorni, adessoISO, lunediDi, differenzaGiorni } from "./date.js";
+import { oggiISO, aggiungiGiorni, adessoISO, lunediDi, differenzaGiorni, aISO } from "./date.js";
 import { prossimaData, normalizza as normalizzaRicorrenza } from "./ricorrenze.js";
 
 const CHIAVE = "impegni.v1";
@@ -53,12 +53,21 @@ export function carica() {
       stato = { ...statoVuoto(), ...s };
       stato.impostazioni = { ...IMPOSTAZIONI_DEFAULT, ...(s.impostazioni || {}) };
       stato.sync = { ...statoVuoto().sync, ...(s.sync || {}) };
+      pulisciEliminati();
     }
   } catch (e) {
     console.warn("Archivio locale illeggibile, riparto da zero", e);
     stato = statoVuoto();
   }
   return stato;
+}
+
+/** Dimentica gli impegni eliminati da più di 60 giorni e già sincronizzati. */
+function pulisciEliminati() {
+  const soglia = new Date(Date.now() - 60 * 86400000).toISOString();
+  for (const [id, i] of Object.entries(stato.impegni)) {
+    if (i.eliminato && (i.aggiornato_il || "") < soglia && !stato.sync.pendingImpegni.includes(id)) delete stato.impegni[id];
+  }
 }
 
 function salva() {
@@ -190,7 +199,10 @@ export function segnaFatto(id, fatto = true) {
 
   let creato = null;
   if (fatto && i.ricorrenza && !i.prossimo_creato) {
-    const data = prossimaData(i.data, i.ricorrenza);
+    // Se l'impegno era arretrato, la ricorrenza successiva non deve nascere già scaduta.
+    const oggi = oggiISO();
+    let data = prossimaData(i.data, i.ricorrenza);
+    for (let k = 0; data && data < oggi && k < 5000; k++) data = prossimaData(data, i.ricorrenza);
     if (data) {
       creato = {
         ...i, id: uuid(), data, fatto: false, fatto_il: null, prossimo_creato: null,
@@ -256,7 +268,7 @@ export function esitoGiorno(iso) {
   const fatti = lista.filter((i) => i.fatto).length;
   // Se la giornata è stata chiusa con cose slittate, la serie si interrompe
   // anche se gli impegni rimandati non compaiono più su quel giorno.
-  const rotto = (c && (c.slittati > 0 || c.fatti < c.totali)) || fatti < lista.length;
+  const rotto = (c && c.slittati > 0) || fatti < lista.length;
   return { totali, fatti, pieno: !rotto, rotto };
 }
 
@@ -294,20 +306,24 @@ export function migliorSerie(oggi = oggiISO()) {
 export function settimana(oggi = oggiISO()) {
   const lunedi = lunediDi(oggi);
   const giorni = [];
-  let fatti = 0, totali = 0;
+  let fatti = 0, totali = 0, fattiFinora = 0, totaliFinora = 0;
   for (let k = 0; k < 7; k++) {
     const iso = aggiungiGiorni(lunedi, k);
     const lista = tutti().filter((i) => i.data === iso);
     const f = lista.filter((i) => i.fatto).length;
     giorni.push({ data: iso, fatti: f, totali: lista.length });
     fatti += f; totali += lista.length;
+    if (iso <= oggi) { fattiFinora += f; totaliFinora += lista.length; }
   }
-  return { lunedi, giorni, fatti, totali, percentuale: totali ? Math.round((fatti / totali) * 100) : 0 };
+  return {
+    lunedi, giorni, fatti, totali, fattiFinora, totaliFinora,
+    percentuale: totaliFinora ? Math.round((fattiFinora / totaliFinora) * 100) : 0,
+  };
 }
 
 export function fattiUltimi(giorniIndietro = 30, oggi = oggiISO()) {
   const da = aggiungiGiorni(oggi, -giorniIndietro);
-  const lista = tutti().filter((i) => i.fatto && i.fatto_il && i.fatto_il.slice(0, 10) >= da);
+  const lista = tutti().filter((i) => i.fatto && i.fatto_il && aISO(new Date(i.fatto_il)) >= da);
   const perTipo = {};
   for (const i of lista) perTipo[i.tipo] = (perTipo[i.tipo] || 0) + 1;
   return { totale: lista.length, perTipo };

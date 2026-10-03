@@ -30,11 +30,13 @@ function numero(s) {
 }
 
 function normalizzaTesto(testo) {
-  // Un carattere alla volta, così la lunghezza resta identica all'originale.
+  // Un carattere alla volta, così la lunghezza resta identica all'originale
+  // (anche con emoji e altri simboli lunghi due unità).
   let out = "";
   for (const ch of testo) {
-    const base = ch.normalize("NFD")[0] || ch;
-    out += base.toLowerCase();
+    let b = (ch.normalize("NFD")[0] || ch).toLowerCase();
+    if (b.length !== ch.length) b = "\u0001".repeat(ch.length);
+    out += b;
   }
   // Apostrofi tipografici -> apostrofo semplice (stessa lunghezza)
   return out.replace(/[’‘`]/g, "'");
@@ -124,6 +126,20 @@ export function analizza(testo, oggi = oggiISO()) {
     data = aggiungiGiorni(oggi, 7);
   } else if ((m = prendi(/\b(?:il )?(?:mese prossimo|prossimo mese)\b/))) {
     data = aggiungiMesi(oggi, 1);
+  } else if ((m = prendi(new RegExp(`\\b(?:il |questo |il prossimo |prossimo )?(${G})\\s+(\\d{1,2})(?:\\s+(${M}))?(?:\\s+(\\d{4}))?\\b(?!\\s*[:.]\\d)`)))) {
+    // "lunedì 6" o "lunedì 6 ottobre": il numero comanda, il nome del giorno aiuta solo a leggere.
+    const g = Number(m[2]);
+    const o = daISO(oggi);
+    let d;
+    if (m[3]) {
+      const anno = m[4] ? Number(m[4]) : o.getFullYear();
+      d = new Date(anno, MESI_NOME[m[3]], g);
+      if (!m[4] && aISO(d) < oggi) d = new Date(anno + 1, MESI_NOME[m[3]], g);
+    } else {
+      d = new Date(o.getFullYear(), o.getMonth(), g);
+      if (d.getDate() !== g || aISO(d) < oggi) d = new Date(o.getFullYear(), o.getMonth() + 1, g);
+    }
+    if (d.getDate() === g) data = aISO(d); else spans.pop();
   } else if ((m = prendi(new RegExp(`\\b(?:il |l')?(\\d{1,2})\\s+(${M})(?:\\s+(\\d{4}))?\\b`)))) {
     const g = Number(m[1]), mese = MESI_NOME[m[2]];
     const anno = m[3] ? Number(m[3]) : daISO(oggi).getFullYear();
@@ -158,14 +174,19 @@ export function analizza(testo, oggi = oggiISO()) {
   }
   if (ora) trovati.ora = true;
 
+  // Se l'ora è nota, "mattina/pomeriggio/sera" accanto alla data non aggiunge nulla al titolo.
+  if (ora && data) {
+    while ((m = prendi(/\b(?:di |la |in |al |nel )?(?:mattina|mattino|pomeriggio|sera|serata|notte)\b/))) { /* consumato */ }
+  }
+
   // --- priorità ---------------------------------------------------------------
   if ((m = prendi(/\b(?:urgentissim[oa]|urgente|importante|importantissim[oa]|priorita alta|alta priorita|alta|prioritario|fondamentale)\b/))) priorita = "Alta";
   else if ((m = prendi(/\b(?:priorita bassa|bassa priorita|bassa|quando posso|con calma|se riesco|prima o poi|senza fretta)\b/))) priorita = "Bassa";
-  else if ((m = prendi(/\b(?:priorita media|media priorita|media)\b/))) priorita = "Media";
+  else if ((m = prendi(/\b(?:priorita media|media priorita)\b/))) priorita = "Media";
   if (priorita) trovati.priorita = true;
 
   // --- tipo: etichetta esplicita in coda, altrimenti si indovina ----------------
-  if ((m = prendi(/(?:,|#|\s)\s*(sport|casa|personale)\s*$/))) {
+  if ((m = prendi(/(?:,|#)\s*(sport|casa|personale)\s*$/))) {
     tipo = m[1][0].toUpperCase() + m[1].slice(1);
     trovati.tipo = true;
   } else if (PAROLE_SPORT.test(norm)) tipo = "Sport";
@@ -185,8 +206,8 @@ export function analizza(testo, oggi = oggiISO()) {
   let prima;
   do {
     prima = titolo;
-    titolo = titolo.replace(/\s+(?:alle|il|di|a|per|da|in|con|e|ogni|del|della|al|alla|nel|nella|lo|la|i|gli|le)$/i, "").trim();
-    titolo = titolo.replace(/^(?:e|ed|poi|,)\s+/i, "").trim();
+    titolo = titolo.replace(/\s+(?:alle|il|di|a|per|da|in|con|e|ogni|del|della|al|alla|nel|nella|lo|la|i|gli|le|entro|fino|fino a)$/i, "").trim();
+    titolo = titolo.replace(/^(?:e|ed|poi|entro|,)\s+/i, "").trim();
     titolo = titolo.replace(/[\s,;:.\-–]+$/g, "").trim();
   } while (titolo !== prima);
   if (titolo) titolo = titolo[0].toUpperCase() + titolo.slice(1);

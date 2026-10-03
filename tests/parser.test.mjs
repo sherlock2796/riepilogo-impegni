@@ -110,3 +110,61 @@ test("prossimaData per ricorrenze", () => {
   assert.equal(descrivi({ tipo: "settimane", ogni: 1, giorniSettimana: [0, 3] }), "ogni lunedì e giovedì");
   assert.equal(descrivi({ tipo: "mesi", ogni: 2 }), "ogni 2 mesi");
 });
+
+test("casi limite: emoji, giorno con numero, tag con virgola, parole simili", () => {
+  let r = analizza("🦷 dentista martedì alle 15", OGGI);
+  assert.equal(r.titolo, "🦷 dentista");
+  assert.equal(r.data, "2026-10-06");
+  assert.equal(r.ora, "15:00");
+
+  r = analizza("lunedì 6 alle 9 riunione", OGGI);
+  assert.equal(r.data, "2026-10-06");
+  assert.equal(r.ora, "09:00");
+  assert.equal(r.titolo, "Riunione");
+
+  r = analizza("venerdì 16 ottobre cena", OGGI);
+  assert.equal(r.data, "2026-10-16");
+  assert.equal(r.titolo, "Cena");
+
+  r = analizza("tornare a casa alle 18", OGGI);
+  assert.equal(r.titolo, "Tornare a casa");
+  assert.equal(r.tipo, "Casa");
+  assert.equal(r.ora, "18:00");
+
+  r = analizza("post sui social media domani", OGGI);
+  assert.equal(r.titolo, "Post sui social media");
+  assert.equal(r.priorita, "Media");
+
+  r = analizza("consegnare relazione entro venerdì", OGGI);
+  assert.equal(r.titolo, "Consegnare relazione");
+  assert.equal(r.data, "2026-10-09");
+
+  r = analizza("Marta alle 10", OGGI);
+  assert.equal(r.titolo, "Marta");
+  assert.equal(r.priorita, "Media");
+
+  r = analizza("alle 24 festa", OGGI);
+  assert.equal(r.ora, null, "ora impossibile ignorata");
+
+  r = analizza("", OGGI);
+  assert.equal(r.titolo, "");
+  assert.equal(r.data, OGGI);
+
+  r = analizza("ogni lunedì e mercoledì e venerdì corsa alle 7", OGGI);
+  assert.deepEqual(r.ricorrenza.giorniSettimana, [0, 2, 4]);
+  assert.equal(r.ora, "07:00");
+  assert.equal(r.tipo, "Sport");
+});
+
+test("parte del giorno: tolta dal titolo solo se l'ora è nota", () => {
+  let r = analizza("corsa domenica mattina alle 8", OGGI);
+  assert.equal(r.titolo, "Corsa");
+  assert.equal(r.data, "2026-10-04");
+  assert.equal(r.ora, "08:00");
+  r = analizza("cena domani sera alle 20", OGGI);
+  assert.equal(r.titolo, "Cena");
+  r = analizza("chiamare mamma domani mattina", OGGI);
+  assert.equal(r.titolo, "Chiamare mamma mattina", "senza ora resta, perché è informazione utile");
+  r = analizza("Serata cinema", OGGI);
+  assert.equal(r.titolo, "Serata cinema");
+});

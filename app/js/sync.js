@@ -2,21 +2,32 @@
 //
 // Se config.js non ha URL e chiave, l'app resta solo locale e questo modulo
 // non carica nemmeno la libreria. Quando si è collegati:
-//   1. pull  -> righe cambiate dal server dopo l'ultima sync, fuse nello store
+//   1. pull  -> righe cambiate sul server dopo l'ultima sync, fuse nello store
 //   2. push  -> righe locali pendenti, upsert sul server
 // Si ripete all'apertura, al ritorno in primo piano, al ritorno online e
 // ogni due minuti.
+//
+// Il "segnalibro" dell'ultima sync usa la colonna sincronizzato_il, scritta
+// dal server (trigger in supabase/schema.sql): così gli orologi dei vari
+// dispositivi non contano. Per decidere chi vince in caso di conflitto si
+// usa invece aggiornato_il del dispositivo (vince l'ultima modifica).
 
 import * as store from "./store.js";
 
 const CDN = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 const INTERVALLO_MS = 120000;
+const PAGINA = 1000;
 
 let client = null;
 let utente = null;
 let timer = null;
-let inCorso = false;
+let promessaInit = null;
+let promessaSync = null;
+let richiestaInCoda = false;
+let ascoltatoriGlobali = false;
+let creaClientPersonalizzato = null; // usato solo dai test
 const ascoltatori = new Set();
+
 export const statoSync = { stato: "non-configurato", messaggio: "", utente: null, ultimaSync: null };
 
 function emetti(patch) {
@@ -35,16 +46,42 @@ export function configurato() {
   return !!(c.supabaseUrl && c.supabaseAnonKey && !c.supabaseUrl.includes("INSERISCI"));
 }
 
-export async function init() {
+// ------------------------------- avvio ---------------------------------------
+
+async function caricaClient() {
+  if (client) return client;
+  if (creaClientPersonalizzato) {
+    client = creaClientPersonalizzato();
+    return client;
+  }
+  const { createClient } = await import(CDN);
+  client = createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey, {
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+  });
+  return client;
+}
+
+/** Avvia la sincronizzazione. Richiamabile: se la libreria non si era caricata, riprova. */
+export function init() {
+  if (!promessaInit) {
+    promessaInit = _init().finally(() => { if (!client) promessaInit = null; });
+  }
+  return promessaInit;
+}
+
+async function _init() {
   if (!configurato()) { emetti({ stato: "non-configurato" }); return; }
+  if (!ascoltatoriGlobali) {
+    ascoltatoriGlobali = true;
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) risveglia(); });
+    window.addEventListener("online", risveglia);
+    window.addEventListener("focus", risveglia);
+  }
   try {
-    const { createClient } = await import(CDN);
-    client = createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
-    });
+    await caricaClient();
   } catch (e) {
     console.error(e);
-    emetti({ stato: "errore", messaggio: "Libreria di sincronizzazione non raggiungibile" });
+    emetti({ stato: "errore", messaggio: "Libreria di sincronizzazione non raggiungibile: riprovo appena c'è rete." });
     return;
   }
 
@@ -59,21 +96,23 @@ export async function init() {
   const frammento = new URLSearchParams(location.hash.replace(/^#/, ""));
   if (frammento.get("error_description") || frammento.get("error")) {
     const desc = frammento.get("error_description") || frammento.get("error") || "";
-    emetti({ stato: data?.session?.user ? statoSync.stato : "disconnesso", messaggio: traduci(desc.replace(/\+/g, " ")) });
+    emetti({ messaggio: traduci(desc.replace(/\+/g, " ")) });
   }
   // Pulisce il frammento lasciato dal link magico e torna alla vista Oggi.
   if (/access_token|refresh_token|error_description|error=/.test(location.hash)) {
     history.replaceState(null, "", location.pathname + location.search + "#/oggi");
   }
+}
 
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) sincronizza(); });
-  window.addEventListener("online", () => sincronizza());
-  window.addEventListener("focus", () => sincronizza());
+function risveglia() {
+  if (!client) { init(); return; }
+  sincronizza();
 }
 
 function impostaUtente(u) {
   utente = u;
   clearInterval(timer);
+  timer = null;
   if (!u) {
     emetti({ stato: "disconnesso", utente: null });
     return;
@@ -87,12 +126,13 @@ function impostaUtente(u) {
   }
   sincronizza();
   timer = setInterval(sincronizza, INTERVALLO_MS);
+  timer.unref?.();
 }
 
 // ------------------------------- accesso -------------------------------------
 
 export async function inviaLink(email) {
-  if (!client) throw new Error("Sincronizzazione non configurata");
+  if (!client) throw new Error("Sincronizzazione non disponibile: controlla la connessione.");
   const redirect = location.origin + location.pathname;
   const { error } = await client.auth.signInWithOtp({
     email: email.trim(),
@@ -102,14 +142,15 @@ export async function inviaLink(email) {
 }
 
 export async function verificaCodice(email, codice) {
-  if (!client) throw new Error("Sincronizzazione non configurata");
+  if (!client) throw new Error("Sincronizzazione non disponibile: controlla la connessione.");
   const { error } = await client.auth.verifyOtp({ email: email.trim(), token: codice.trim(), type: "email" });
   if (error) throw new Error(traduci(error.message));
 }
 
+/** Esce solo da questo dispositivo: gli altri restano collegati. */
 export async function esci() {
   if (!client) return;
-  await client.auth.signOut();
+  await client.auth.signOut({ scope: "local" });
   store.aggiornaInfoSync({ utenteId: null, ultimaSyncImpegni: null, ultimaSyncChiusure: null, ultimaSyncImpostazioni: null });
 }
 
@@ -139,7 +180,7 @@ export function decodificaCodice(codice) {
 }
 
 export async function creaCodiceCollegamento() {
-  if (!client) throw new Error("Sincronizzazione non configurata");
+  if (!client) throw new Error("Sincronizzazione non disponibile: controlla la connessione.");
   const { data } = await client.auth.getSession();
   if (!data?.session) throw new Error("Non sei collegato.");
   const codice = codificaCodice(data.session);
@@ -148,7 +189,7 @@ export async function creaCodiceCollegamento() {
 }
 
 export async function usaCodiceCollegamento(codice) {
-  if (!client) throw new Error("Sincronizzazione non configurata");
+  if (!client) throw new Error("Sincronizzazione non disponibile: controlla la connessione.");
   const tokens = decodificaCodice(codice);
   const r1 = await client.auth.setSession(tokens);
   if (r1.error) throw new Error(traduci(r1.error.message));
@@ -157,70 +198,88 @@ export async function usaCodiceCollegamento(codice) {
 }
 
 function traduci(msg = "") {
-  const m = msg.toLowerCase();
+  const m = String(msg).toLowerCase();
   if (m.includes("rate limit") || m.includes("security purposes")) return "Troppi tentativi: aspetta qualche minuto e riprova.";
   if (m.includes("invalid") && m.includes("otp")) return "Codice non valido o scaduto.";
   if (m.includes("expired") || m.includes("otp_expired")) return "Link scaduto o già usato: richiedine uno nuovo.";
   if (m.includes("already used") || m.includes("refresh token")) return "Codice già usato o non più valido: generane uno nuovo da Safari.";
   if (m.includes("invalid email")) return "Indirizzo email non valido.";
-  if (m.includes("fetch")) return "Nessuna connessione.";
-  return msg;
+  if (m.includes("sincronizzato_il")) return "Il database Supabase va aggiornato: esegui supabase/aggiornamento-1.sql (vedi README).";
+  if (m.includes("does not exist") && m.includes("relation")) return "Tabelle mancanti su Supabase: esegui supabase/schema.sql (vedi README).";
+  if (m.includes("jwt") || m.includes("session")) return "Sessione scaduta: accedi di nuovo.";
+  if (m.includes("fetch") || m.includes("load failed") || m.includes("network")) return "Nessuna connessione.";
+  return String(msg);
 }
 
 // --------------------------------- sync --------------------------------------
 
-export async function sincronizza() {
-  if (!client || !utente || inCorso) return;
-  if (!navigator.onLine) { emetti({ stato: "offline" }); return; }
-  inCorso = true;
-  emetti({ stato: "in-corso" });
-  try {
-    await pull();
-    await push();
-    emetti({ stato: "collegato", messaggio: "", ultimaSync: new Date().toISOString() });
-  } catch (e) {
-    console.error("Sync fallita", e);
-    emetti({ stato: "errore", messaggio: traduci(e.message || String(e)) });
-  } finally {
-    inCorso = false;
-  }
+/** Avvia una sincronizzazione (o si accoda a quella in corso). Ritorna una promessa. */
+export function sincronizza() {
+  if (!client || !utente) return Promise.resolve();
+  if (!navigator.onLine) { emetti({ stato: "offline" }); return Promise.resolve(); }
+  if (promessaSync) { richiestaInCoda = true; return promessaSync; }
+  promessaSync = (async () => {
+    emetti({ stato: "in-corso" });
+    try {
+      await pull();
+      await push();
+      emetti({ stato: "collegato", messaggio: "", ultimaSync: new Date().toISOString() });
+    } catch (e) {
+      console.error("Sync fallita", e);
+      emetti({ stato: "errore", messaggio: traduci(e.message || String(e)) });
+    } finally {
+      promessaSync = null;
+      if (richiestaInCoda) { richiestaInCoda = false; sincronizza(); }
+    }
+  })();
+  return promessaSync;
 }
 
-function margine(iso) {
-  // Un minuto di margine per non perdere righe con orologi leggermente sfasati.
-  if (!iso) return null;
-  return new Date(new Date(iso).getTime() - 60000).toISOString();
+function normalizzaTs(x) {
+  if (!x) return null;
+  const d = new Date(x);
+  return isNaN(d) ? x : d.toISOString();
+}
+
+/** Scarica da una tabella le righe con sincronizzato_il >= segnalibro, a pagine. */
+async function scaricaTabella(tabella, segnalibro) {
+  const righe = [];
+  const visti = new Set();
+  let cursore = segnalibro || null;
+  for (let giro = 0; giro < 50; giro++) {
+    let q = client.from(tabella).select("*").eq("user_id", utente.id)
+      .order("sincronizzato_il", { ascending: true }).limit(PAGINA);
+    if (cursore) q = q.gte("sincronizzato_il", cursore);
+    const { data, error } = await q;
+    if (error) throw error;
+    const pagina = data || [];
+    for (const r of pagina) {
+      const k = tabella === "chiusure" ? r.data : r.id;
+      if (!visti.has(k)) { visti.add(k); righe.push(r); }
+    }
+    if (pagina.length < PAGINA) break;
+    const ultimo = normalizzaTs(pagina[pagina.length - 1].sincronizzato_il);
+    if (ultimo === cursore) break; // tutte uguali: non si può avanzare oltre
+    cursore = ultimo;
+  }
+  const ultimo = righe.length ? normalizzaTs(righe[righe.length - 1].sincronizzato_il) : null;
+  return { righe, segnalibro: ultimo || segnalibro || null };
 }
 
 async function pull() {
   const info = store.infoSync();
-
-  let q = client.from("impegni").select("*").eq("user_id", utente.id).order("aggiornato_il", { ascending: true }).limit(2000);
-  const m1 = margine(info.ultimaSyncImpegni);
-  if (m1) q = q.gt("aggiornato_il", m1);
-  const r1 = await q;
-  if (r1.error) throw r1.error;
-
-  let q2 = client.from("chiusure").select("*").eq("user_id", utente.id).order("aggiornato_il", { ascending: true }).limit(2000);
-  const m2 = margine(info.ultimaSyncChiusure);
-  if (m2) q2 = q2.gt("aggiornato_il", m2);
-  const r2 = await q2;
-  if (r2.error) throw r2.error;
-
+  const imp = await scaricaTabella("impegni", info.ultimaSyncImpegni);
+  const chi = await scaricaTabella("chiusure", info.ultimaSyncChiusure);
   const r3 = await client.from("impostazioni").select("*").eq("user_id", utente.id).maybeSingle();
   if (r3.error) throw r3.error;
 
-  const impegni = (r1.data || []).map(daRigaImpegno);
-  const chiusure = (r2.data || []).map(({ user_id, ...c }) => c);
-  const impostazioni = r3.data ? { ...r3.data.dati, aggiornato_il: r3.data.aggiornato_il } : null;
-  store.applicaRemoto({ impegni, chiusure, impostazioni });
-
-  const patch = {};
-  if (impegni.length) patch.ultimaSyncImpegni = impegni[impegni.length - 1].aggiornato_il;
-  else if (!info.ultimaSyncImpegni) patch.ultimaSyncImpegni = new Date().toISOString();
-  if (chiusure.length) patch.ultimaSyncChiusure = chiusure[chiusure.length - 1].aggiornato_il;
-  else if (!info.ultimaSyncChiusure) patch.ultimaSyncChiusure = new Date().toISOString();
-  store.aggiornaInfoSync(patch);
+  const impostazioni = r3.data ? { ...r3.data.dati, aggiornato_il: normalizzaTs(r3.data.aggiornato_il) } : null;
+  store.applicaRemoto({
+    impegni: imp.righe.map(daRigaImpegno),
+    chiusure: chi.righe.map(daRigaChiusura),
+    impostazioni,
+  });
+  store.aggiornaInfoSync({ ultimaSyncImpegni: imp.segnalibro, ultimaSyncChiusure: chi.segnalibro });
 }
 
 async function push() {
@@ -232,7 +291,7 @@ async function push() {
     store.segnaSincronizzati({ impegni: p.impegni.map((i) => i.id) });
   }
   if (p.chiusure.length) {
-    const righe = p.chiusure.map((c) => ({ ...c, user_id: utente.id }));
+    const righe = p.chiusure.map((c) => aRigaChiusura(c, utente.id));
     const { error } = await client.from("chiusure").upsert(righe, { onConflict: "user_id,data" });
     if (error) throw error;
     store.segnaSincronizzati({ chiusure: p.chiusure.map((c) => c.data) });
@@ -261,5 +320,32 @@ function daRigaImpegno(r) {
   for (const c of COLONNE) i[c] = r[c] === undefined ? null : r[c];
   i.fatto = !!i.fatto;
   i.eliminato = !!i.eliminato;
+  i.fatto_il = normalizzaTs(i.fatto_il);
+  i.creato_il = normalizzaTs(i.creato_il);
+  i.aggiornato_il = normalizzaTs(i.aggiornato_il);
   return i;
 }
+
+function aRigaChiusura(c, userId) {
+  return {
+    user_id: userId, data: c.data, fatti: c.fatti || 0, totali: c.totali || 0, slittati: c.slittati || 0,
+    chiusa_il: c.chiusa_il || new Date().toISOString(), aggiornato_il: c.aggiornato_il || new Date().toISOString(),
+  };
+}
+
+function daRigaChiusura(r) {
+  return {
+    data: r.data, fatti: r.fatti || 0, totali: r.totali || 0, slittati: r.slittati || 0,
+    chiusa_il: normalizzaTs(r.chiusa_il), aggiornato_il: normalizzaTs(r.aggiornato_il),
+  };
+}
+
+// ------------------------------- solo per i test -------------------------------
+
+export function _usaClientPerTest(f) { creaClientPersonalizzato = f; }
+export function _resetPerTest() {
+  clearInterval(timer);
+  client = null; utente = null; timer = null; promessaInit = null; promessaSync = null; richiestaInCoda = false;
+  Object.assign(statoSync, { stato: "non-configurato", messaggio: "", utente: null, ultimaSync: null });
+}
+export function _attendiSync() { return promessaSync || Promise.resolve(); }

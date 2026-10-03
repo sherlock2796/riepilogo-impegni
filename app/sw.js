@@ -3,7 +3,11 @@
 // le richieste alla stessa origine vengono servite dalla cache e aggiornate
 // in sottofondo. Le chiamate verso Supabase e i font passano dritte.
 
-const VERSIONE = "impegni-v1.0.5";
+const VERSIONE = "impegni-v1.0.6";
+const CACHE_ESTERNI = "impegni-esterni-v1";
+// Libreria di sincronizzazione e caratteri: messi in cache al primo uso,
+// così l'app parte anche offline (e la libreria non manca mai).
+const ORIGINI_ESTERNE = ["https://cdn.jsdelivr.net", "https://fonts.googleapis.com", "https://fonts.gstatic.com"];
 const FILE = [
   "./",
   "./index.html",
@@ -38,7 +42,7 @@ self.addEventListener("install", (e) => {
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys().then(async (chiavi) => {
-      const vecchie = chiavi.filter((k) => k !== VERSIONE);
+      const vecchie = chiavi.filter((k) => k !== VERSIONE && k !== CACHE_ESTERNI);
       await Promise.all(vecchie.map((k) => caches.delete(k)));
       await self.clients.claim();
       if (!vecchie.length) return; // prima installazione: niente da ricaricare
@@ -51,7 +55,21 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.origin !== location.origin) return;
+  if (e.request.method !== "GET") return;
+
+  if (url.origin !== location.origin) {
+    if (!ORIGINI_ESTERNE.includes(url.origin)) return;
+    e.respondWith(
+      caches.open(CACHE_ESTERNI).then((c) => c.match(e.request).then((inCache) => {
+        const rete = fetch(e.request).then((r) => {
+          if (r && r.ok) c.put(e.request, r.clone());
+          return r;
+        }).catch(() => inCache);
+        return inCache || rete;
+      }))
+    );
+    return;
+  }
 
   // La pagina: prima la rete (per avere sempre l'ultima versione), poi la cache.
   if (e.request.mode === "navigate") {

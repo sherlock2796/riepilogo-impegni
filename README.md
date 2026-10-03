@@ -50,8 +50,9 @@ app/
     frasi.js          banca delle frasi e scelta contestuale
     ricorrenze.js     calcolo della ricorrenza successiva
     date.js           utilità date
-supabase/schema.sql   tabelle e regole di sicurezza da creare su Supabase
-tests/                test unitari (node --test tests/parser.test.mjs)
+supabase/schema.sql   tabelle, trigger e regole di sicurezza da creare su Supabase
+supabase/aggiornamento-1.sql   solo per chi aveva già creato le tabelle con la prima versione
+tests/                test unitari (node --test tests/*.test.mjs) e di regressione nel browser (node tests/e2e.mjs)
 .github/workflows/pages.yml   pubblicazione automatica su GitHub Pages
 ```
 
@@ -72,7 +73,12 @@ Serve una volta sola, circa dieci minuti.
    (piano Free, regione Europa).
 2. **SQL Editor → New query**: incolla il contenuto di `supabase/schema.sql`
    ed esegui. Crea le tabelle `impegni`, `chiusure`, `impostazioni` con le
-   regole per cui ogni utente vede solo le proprie righe.
+   regole per cui ogni utente vede solo le proprie righe. Lo script è
+   idempotente: rieseguirlo dopo un aggiornamento non fa danni.
+   Se avevi già creato le tabelle con la prima versione, esegui
+   `supabase/aggiornamento-1.sql` (o di nuovo `schema.sql`): aggiunge la
+   colonna `sincronizzato_il` usata come segnalibro di sincronizzazione.
+   Senza, l'app mostra "Il database Supabase va aggiornato".
 3. **Authentication → Providers → Email**: lascia attivo Email, disattiva
    «Confirm email» se vuoi evitare la doppia mail. Il link magico è già abilitato.
 4. **Authentication → URL Configuration**:
@@ -134,8 +140,23 @@ raramente.
 
 ```
 npx http-server app -p 8787 -c-1      # poi apri http://localhost:8787/
-node --test tests/parser.test.mjs     # test del parser e delle ricorrenze
+node --test tests/*.test.mjs          # test unitari: parser, ricorrenze, archivio, sincronizzazione
+node tests/e2e.mjs                    # regressione nel browser (serve playwright + Chromium)
 ```
+
+I test di sincronizzazione usano un server Supabase finto in memoria e
+simulano più dispositivi; quello nel browser percorre tutti i flussi
+dell'interfaccia e salva le schermate in `tests/schermate/`.
+
+### Come funziona la sincronizzazione
+
+- Ogni dispositivo lavora sul proprio archivio locale e segna cosa va spinto.
+- A ogni giro: prima scarica dal server le righe con `sincronizzato_il`
+  successivo all'ultimo segnalibro (timestamp scritto dal server, quindi
+  immune agli orologi dei dispositivi), poi spinge le proprie modifiche.
+- In caso di modifica dello stesso impegno da due parti vince l'ultima
+  (`aggiornato_il` del dispositivo). Le eliminazioni sono "soft" e si propagano.
+- "Esci" scollega solo il dispositivo corrente.
 
 ## Note
 

@@ -106,7 +106,7 @@ main {
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
-  padding: 18px 16px calc(var(--nav-h) + 96px);
+  padding: 18px 16px calc(var(--nav-h) + 96px + env(safe-area-inset-bottom));
   padding-top: max(18px, env(safe-area-inset-top));
 }
 .nav {

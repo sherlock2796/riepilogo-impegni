@@ -7,7 +7,7 @@ import { scegliFrase, saluto, BASE, MOMENTI } from "./frasi.js";
 import { descrivi as descriviRicorrenza, allineaData } from "./ricorrenze.js";
 import * as D from "./date.js";
 
-const VERSIONE_APP = "1.0.5";
+const VERSIONE_APP = "1.0.6";
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -48,6 +48,10 @@ function avvia() {
   $("#vista").addEventListener("click", gestisciClick);
   $("#vista").addEventListener("change", gestisciChange);
   $("#vista").addEventListener("input", (e) => { if (e.target.id === "codice-incolla") ui.codice.incollato = e.target.value; });
+  $("#vista").addEventListener("toggle", (e) => {
+    const d = e.target;
+    if (d.matches?.("details[data-momento]")) ui.frasiMomentoAperto = d.open ? d.dataset.momento : null;
+  }, true);
   $("#sheet").addEventListener("click", (e) => { if (e.target.closest("[data-chiudi-sheet]")) chiudiSheet(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") chiudiSheet(); });
   window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); ui.installPrompt = e; if (ui.vista === "impostazioni") render(); });
@@ -198,7 +202,7 @@ function vistaOggi() {
 
   if (arr.length) {
     const fraseArr = scegliFrase("arretrati", ctx, opzioniFrasi(`${g}:arretrati`));
-    html += `<section class="sezione">
+    html += `<section class="sezione" id="sezione-arretrati">
       <div class="intestazione"><h2>Arretrati</h2><span class="conta">${arr.length}</span></div>
       <div class="carta ambra">
         <p class="nota-carta">${h(fraseArr)}</p>
@@ -211,7 +215,7 @@ function vistaOggi() {
     </section>`;
   }
 
-  html += `<section class="sezione"><div class="intestazione"><h2>Oggi</h2><span class="conta">${n ? `${fatti}/${n}` : ""}</span></div>`;
+  html += `<section class="sezione" id="sezione-oggi"><div class="intestazione"><h2>Oggi</h2><span class="conta">${n ? `${fatti}/${n}` : ""}</span></div>`;
   if (!n) {
     html += `<div class="carta"><div class="vuoto"><strong>Niente in programma</strong>Tocca + per aggiungere qualcosa, o goditi il vuoto.</div></div>`;
   } else if (imp.modalitaFocus && !ui.focusMostraTutti && fatti < n && !chiusa) {
@@ -233,13 +237,13 @@ function vistaOggi() {
   const ora = new Date().getHours();
   if (chiusa) {
     html += `<div class="chiusura-card fatta"><span class="luna">🌙</span><div><div class="t">Giornata chiusa</div><div class="d">${chiusa.fatti} su ${chiusa.totali} fatti${chiusa.slittati ? `, ${chiusa.slittati} ${chiusa.slittati === 1 ? "spostato" : "spostati"} a domani` : ""}. A domani!</div></div></div>`;
-  } else if (ora >= imp.oraChiusura || ora < 4) {
+  } else if (ora >= imp.oraChiusura) {
     html += `<button class="chiusura-card" data-azione="chiudi-giornata"><span class="luna">🌙</span><div><div class="t">Chiudi la giornata</div><div class="d">Bilancio di oggi, cosa slitta a domani, e buonanotte.</div></div><span class="freccia">${ICONE.destra}</span></button>`;
   }
 
   const domani = store.perData(D.aggiungiGiorni(g, 1));
   if (domani.length) {
-    html += `<section class="sezione"><div class="intestazione"><h2>Domani</h2><a class="link" href="#/settimana">Settimana</a></div>
+    html += `<section class="sezione" id="sezione-domani"><div class="intestazione"><h2>Domani</h2><a class="link" href="#/settimana">Settimana</a></div>
       <div class="carta">${domani.map((i) => rigaImpegno(i, { compatta: true })).join("")}</div></section>`;
   }
   return html;
@@ -329,7 +333,7 @@ function vistaStatistiche() {
   html += `<div class="tessere">
     <div class="tessera"><div class="v">${serie}<small>${serie === 1 ? "giorno" : "giorni"}</small></div><div class="e">Serie attuale</div></div>
     <div class="tessera"><div class="v">${migliore}<small>${migliore === 1 ? "giorno" : "giorni"}</small></div><div class="e">Miglior serie</div></div>
-    <div class="tessera"><div class="v">${sett.percentuale}<small>%</small></div><div class="e">Questa settimana · ${sett.fatti}/${sett.totali}</div></div>
+    <div class="tessera"><div class="v">${sett.percentuale}<small>%</small></div><div class="e">Settimana finora · ${sett.fattiFinora}/${sett.totaliFinora}</div></div>
     <div class="tessera"><div class="v">${ultimi.totale}</div><div class="e">Fatti negli ultimi 30 giorni</div></div>
     <div class="tessera larga">
       <div class="e" style="margin-top:0">Settimana giorno per giorno</div>
@@ -337,7 +341,7 @@ function vistaStatistiche() {
         const perc = d.totali ? Math.round((d.fatti / d.totali) * 100) : 0;
         return `<div class="b ${d.data === g ? "oggi" : ""}"><span class="q">${d.totali ? `${d.fatti}/${d.totali}` : "–"}</span><div class="colonna"><i style="height:${perc}%"></i></div><span class="l">${D.GIORNI_LETTERA[k]}</span></div>`;
       }).join("")}</div>
-      <p class="muto piccolo" style="margin-top:10px">Ogni barra è la quota di impegni fatti quel giorno.</p>
+      <p class="muto piccolo" style="margin-top:10px">Ogni barra è la quota di impegni fatti quel giorno. I giorni futuri mostrano quanto c'è in programma.</p>
     </div>
     <div class="tessera larga">
       <div class="e" style="margin-top:0">Per tipo, ultimi 30 giorni</div>
@@ -410,7 +414,7 @@ function vistaImpostazioni() {
   } else {
     html += `<div class="voce"><div><div class="t">${h(s.utente?.email || "")}</div><div class="d">${s.stato === "errore" ? "Errore: " + h(s.messaggio) : s.stato === "offline" ? "Offline: sincronizzo appena torna la rete" : s.ultimaSync ? "Ultima sincronizzazione alle " + D.oraAdesso(new Date(s.ultimaSync)) : "Collegato"}</div></div>
       <button class="bottone-mini" data-azione="sync-ora">Sincronizza ora</button></div>
-      <div class="voce"><div><div class="t">Esci</div><div class="d">I dati restano sia qui sia sul server.</div></div><button class="bottone-mini" data-azione="esci">Esci</button></div>`;
+      <div class="voce"><div><div class="t">Esci da questo dispositivo</div><div class="d">Gli altri dispositivi restano collegati. I dati restano sia qui sia sul server.</div></div><button class="bottone-mini" data-azione="esci">Esci</button></div>`;
     if (!eInstallata()) {
       html += `<div class="voce" style="display:block">
         <div class="t">Collega l'app installata (iPhone)</div>
@@ -742,6 +746,8 @@ function apriFormImpegno({ impegno = null, dataIniziale = ui.oggi } = {}) {
     const interp = $("#f-interpretazione", form);
     nl.addEventListener("input", () => {
       const r = analizza(nl.value, ui.oggi);
+      // Se il testo non dice quando, vale il giorno da cui si è aperto il pannello.
+      if (!r.trovati.data) r.data = r.ricorrenza ? (allineaData(dataIniziale, r.ricorrenza) || dataIniziale) : dataIniziale;
       if (!toccati.has("titolo")) $("#f-titolo", form).value = r.titolo;
       if (!toccati.has("data")) $("#f-data", form).value = r.data;
       if (!toccati.has("ora")) $("#f-ora", form).value = r.ora || "";
