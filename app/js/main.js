@@ -7,7 +7,7 @@ import { scegliFrase, saluto, BASE, MOMENTI } from "./frasi.js";
 import { descrivi as descriviRicorrenza, allineaData } from "./ricorrenze.js";
 import * as D from "./date.js";
 
-const VERSIONE_APP = "1.0.0";
+const VERSIONE_APP = "1.0.2";
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -29,6 +29,7 @@ const ui = {
   focusMostraTutti: false,
   installPrompt: null,
   login: { email: "", inviato: false, errore: "", inCorso: false, ok: "" },
+  codice: { generato: "", errore: "", inCorso: false, mostraIncolla: false },
   frasiMomentoAperto: null,
 };
 
@@ -97,7 +98,16 @@ function pillSync() {
   return `<a href="#/impostazioni" class="stato-sync-pill" id="stato-sync-pill"><span class="pallino"></span><span class="testo"></span></a>`;
 }
 
+let ultimoStatoSync = "";
 function aggiornaStatoSync(s) {
+  // Se cambia lo stato (collegato, scollegato, errore) le viste che lo mostrano vanno ridisegnate.
+  const firma = `${s.stato}|${s.utente?.email || ""}`;
+  if (firma !== ultimoStatoSync) {
+    ultimoStatoSync = firma;
+    const attivo = document.activeElement;
+    const digitando = attivo && $("#vista")?.contains(attivo) && /INPUT|TEXTAREA/.test(attivo.tagName);
+    if ((ui.vista === "impostazioni" || ui.vista === "oggi") && !digitando && $("#sheet").hidden) { render(); return; }
+  }
   const testo = {
     "non-configurato": "Solo locale", disconnesso: "Non collegato", "in-corso": "Sincronizzo…",
     collegato: s.ultimaSync ? `Sincronizzato ${D.oraAdesso(new Date(s.ultimaSync))}` : "Collegato",
@@ -171,6 +181,8 @@ function vistaOggi() {
 
   if (sync.configurato() && sync.statoSync.stato === "disconnesso") {
     html += `<div class="avviso banner-sync"><span>Non sei collegato: i dati restano su questo dispositivo.</span><a class="link" href="#/impostazioni">Collega</a></div>`;
+  } else if (sync.statoSync.utente && eIOS() && !eInstallata() && !localStorage.getItem("bannerIosVisto")) {
+    html += `<div class="avviso banner-sync"><span>Usi l'app installata in Home? Da Impostazioni puoi generare il codice per collegarla.</span><span style="display:flex;gap:12px;flex:none"><a class="link" href="#/impostazioni">Vai</a><button class="link muto" data-azione="banner-ios-chiudi">Chiudi</button></span></div>`;
   }
 
   if (arr.length) {
@@ -327,6 +339,9 @@ function vistaStatistiche() {
 
 // ------------------------------ vista: impostazioni ---------------------------
 
+const eInstallata = () => matchMedia("(display-mode: standalone)").matches || !!navigator.standalone;
+const eIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
 function interruttore(chiave, on) {
   return `<button class="interruttore ${on ? "on" : ""}" role="switch" aria-checked="${on}" data-azione="toggle" data-chiave="${chiave}"></button>`;
 }
@@ -339,17 +354,26 @@ function vistaImpostazioni() {
 
   // --- sincronizzazione
   html += `<section class="sezione" style="margin-top:0"><div class="intestazione"><h2>Sincronizzazione</h2></div><div class="carta">`;
-  if (s.stato === "non-configurato") {
+  if (ui.codice.generato && s.stato !== "non-configurato") {
+    html += `<div class="voce" style="display:block">
+      <div class="t">Codice per l'app installata</div>
+      <div class="d">Questo browser è stato scollegato. Copia il codice e incollalo nell'app installata in Impostazioni → Sincronizzazione.</div>
+      <div class="campo"><textarea id="codice-generato" rows="5" readonly style="font-size:13px;font-family:ui-monospace,monospace">${h(ui.codice.generato)}</textarea></div>
+      <div class="form-azioni"><button class="bottone" data-azione="codice-copia">Copia il codice</button><button class="bottone secondario" data-azione="codice-chiudi">Fatto</button></div>
+      <p class="muto piccolo" style="margin-top:10px">Il codice vale come la tua sessione: non condividerlo e usalo entro poco.</p>
+    </div>`;
+  } else if (s.stato === "non-configurato") {
     html += `<div class="voce" style="display:block"><div class="t">Solo su questo dispositivo</div>
       <div class="d">La sincronizzazione tra telefono e computer non è ancora configurata. Le istruzioni sono nel file README del progetto (sezione Supabase): servono due valori in <code>config.js</code>.</div></div>`;
-  } else if (s.stato === "disconnesso") {
+  } else if (!s.utente) {
     const l = ui.login;
+    if (s.stato === "errore") html += `<div class="voce" style="display:block"><div class="avviso ko">Sincronizzazione non disponibile: ${h(s.messaggio || "errore di rete")}. Controlla la connessione e ricarica.</div></div>`;
     html += `<div class="voce" style="display:block">
       <div class="t">Collega il tuo account</div>
-      <div class="d">Ti mando un link via email. Niente password: clicchi il link oppure inserisci il codice che trovi nel messaggio.</div>
+      <div class="d">Niente password: ti arriva un'email con un link, lo apri e sei dentro.</div>
       <form id="form-login" style="margin-top:12px">
         <div class="campo" style="margin-top:0"><label for="login-email">Email</label><input type="email" id="login-email" required autocomplete="email" inputmode="email" value="${h(l.email)}" placeholder="tu@esempio.it" ${l.inviato ? "readonly" : ""}></div>
-        ${l.inviato ? `<div class="campo"><label for="login-codice">Codice ricevuto per email</label><input type="text" id="login-codice" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" maxlength="8"></div>` : ""}
+        ${l.inviato ? `<div class="campo"><label for="login-codice">Se l'email contiene anche un codice, incollalo qui (facoltativo)</label><input type="text" id="login-codice" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" maxlength="8"></div>` : ""}
         ${l.errore ? `<div class="avviso ko" style="margin-top:12px">${h(l.errore)}</div>` : ""}
         ${l.ok ? `<div class="avviso ok" style="margin-top:12px">${h(l.ok)}</div>` : ""}
         <div class="form-azioni">
@@ -357,11 +381,32 @@ function vistaImpostazioni() {
             ? `<button class="bottone" type="submit" ${l.inCorso ? "disabled" : ""}>Conferma codice</button><button class="bottone secondario" type="button" data-azione="login-reset">Cambia email</button>`
             : `<button class="bottone" type="submit" ${l.inCorso ? "disabled" : ""}>${l.inCorso ? "Invio…" : "Inviami il link"}</button>`}
         </div>
-      </form></div>`;
+      </form></div>
+      <div class="voce" style="display:block">
+        <div class="t">Hai un codice da Safari?</div>
+        <div class="d">${eInstallata() ? "Sei nell'app installata: incolla qui il codice generato da Safari in Impostazioni → Sincronizzazione." : "Serve per collegare l'app installata in Home su iPhone, dove il link via email non arriva."}</div>
+        ${ui.codice.mostraIncolla || eInstallata() ? `<form id="form-codice" style="margin-top:10px">
+          <div class="campo" style="margin-top:0"><textarea id="codice-incolla" rows="4" placeholder="Incolla qui il codice" style="font-size:13px;font-family:ui-monospace,monospace"></textarea></div>
+          ${ui.codice.errore ? `<div class="avviso ko" style="margin-top:10px">${h(ui.codice.errore)}</div>` : ""}
+          <div class="form-azioni"><button class="bottone" type="submit" ${ui.codice.inCorso ? "disabled" : ""}>${ui.codice.inCorso ? "Collego…" : "Collega con il codice"}</button></div>
+        </form>` : `<div style="margin-top:10px"><button class="link" data-azione="codice-mostra-incolla">Incolla un codice</button></div>`}
+      </div>`;
   } else {
     html += `<div class="voce"><div><div class="t">${h(s.utente?.email || "")}</div><div class="d">${s.stato === "errore" ? "Errore: " + h(s.messaggio) : s.stato === "offline" ? "Offline: sincronizzo appena torna la rete" : s.ultimaSync ? "Ultima sincronizzazione alle " + D.oraAdesso(new Date(s.ultimaSync)) : "Collegato"}</div></div>
       <button class="bottone-mini" data-azione="sync-ora">Sincronizza ora</button></div>
       <div class="voce"><div><div class="t">Esci</div><div class="d">I dati restano sia qui sia sul server.</div></div><button class="bottone-mini" data-azione="esci">Esci</button></div>`;
+    if (!eInstallata()) {
+      html += `<div class="voce" style="display:block">
+        <div class="t">Collega l'app installata (iPhone)</div>
+        <div class="d">Il link via email apre Safari, ma l'app aggiunta alla schermata Home non vede quell'accesso. Genera un codice qui, copialo e incollalo nell'app installata in Impostazioni → Sincronizzazione. Attenzione: questo browser verrà scollegato, continuerai dall'app installata.</div>
+        ${ui.codice.generato ? `
+          <div class="campo"><textarea id="codice-generato" rows="5" readonly style="font-size:13px;font-family:ui-monospace,monospace">${h(ui.codice.generato)}</textarea></div>
+          <div class="form-azioni"><button class="bottone" data-azione="codice-copia">Copia il codice</button></div>
+          <p class="muto piccolo" style="margin-top:10px">Ora apri l'app installata, vai in Impostazioni → Sincronizzazione e incolla il codice. Il codice vale come la tua sessione: non condividerlo e usalo entro poco.</p>`
+        : `${ui.codice.errore ? `<div class="avviso ko" style="margin-top:10px">${h(ui.codice.errore)}</div>` : ""}
+          <div style="margin-top:10px"><button class="bottone secondario" data-azione="codice-genera" ${ui.codice.inCorso ? "disabled" : ""}>Genera codice</button></div>`}
+      </div>`;
+    }
   }
   html += `</div></section>`;
 
@@ -402,12 +447,10 @@ function vistaImpostazioni() {
     </div></section>`;
 
   // --- installazione
-  const eInstallata = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
-  const eIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
   html += `<section class="sezione"><div class="intestazione"><h2>Sul telefono</h2></div><div class="carta">
-    ${eInstallata ? `<div class="voce"><div><div class="t">App installata</div><div class="d">Si apre a schermo intero e funziona anche offline.</div></div></div>`
+    ${eInstallata() ? `<div class="voce"><div><div class="t">App installata</div><div class="d">Si apre a schermo intero e funziona anche offline.</div></div></div>`
       : ui.installPrompt ? `<div class="voce"><div><div class="t">Installa l'app</div><div class="d">Icona in home, schermo intero, funziona offline.</div></div><button class="bottone-mini" data-azione="installa">Installa</button></div>`
-      : eIOS ? `<div class="voce" style="display:block"><div class="t">Installa su iPhone</div><div class="d">In Safari tocca Condividi, poi «Aggiungi alla schermata Home».</div></div>`
+      : eIOS() ? `<div class="voce" style="display:block"><div class="t">Installa su iPhone</div><div class="d">In Safari tocca Condividi, poi «Aggiungi alla schermata Home».</div></div>`
       : `<div class="voce" style="display:block"><div class="t">Installa l'app</div><div class="d">Dal menu del browser scegli «Installa app» o «Aggiungi a schermata Home».</div></div>`}
   </div></section>`;
 
@@ -447,6 +490,22 @@ function gestisciClick(e) {
     case "sync-ora": return sync.sincronizza();
     case "esci": return sync.esci().then(() => avvisa("Sei uscito. I dati restano qui."));
     case "login-reset": ui.login = { email: ui.login.email, inviato: false, errore: "", inCorso: false, ok: "" }; return render();
+    case "codice-mostra-incolla": ui.codice.mostraIncolla = true; render(); return $("#codice-incolla")?.focus();
+    case "codice-genera":
+      ui.codice.inCorso = true; ui.codice.errore = ""; render();
+      return sync.creaCodiceCollegamento()
+        .then((c) => { ui.codice.generato = c; })
+        .catch((err) => { ui.codice.errore = err.message || String(err); })
+        .finally(() => { ui.codice.inCorso = false; render(); });
+    case "codice-copia": {
+      const ta = $("#codice-generato");
+      ta?.select();
+      return navigator.clipboard?.writeText(ui.codice.generato)
+        .then(() => avvisa("Codice copiato. Ora incollalo nell'app installata."))
+        .catch(() => { document.execCommand?.("copy"); avvisa("Codice selezionato: tieni premuto e scegli Copia."); });
+    }
+    case "codice-chiudi": ui.codice = { generato: "", errore: "", inCorso: false, mostraIncolla: false }; return render();
+    case "banner-ios-chiudi": localStorage.setItem("bannerIosVisto", "1"); return render();
     case "installa": return ui.installPrompt?.prompt().then(() => { ui.installPrompt = null; render(); });
     case "esporta": return esporta();
     case "cancella-tutto":
@@ -482,7 +541,7 @@ document.addEventListener("submit", async (e) => {
     try {
       if (!l.inviato) {
         await sync.inviaLink(l.email);
-        l.inviato = true; l.ok = "Email inviata. Clicca il link, oppure incolla qui il codice.";
+        l.inviato = true; l.ok = "Email inviata. Apri il link dal messaggio: al ritorno qui sarai collegato.";
       } else {
         const codice = $("#login-codice").value.trim();
         if (!codice) throw new Error("Inserisci il codice ricevuto per email.");
@@ -495,6 +554,18 @@ document.addEventListener("submit", async (e) => {
     } finally {
       l.inCorso = false; render();
       const c = $("#login-codice"); if (c) c.focus();
+    }
+  } else if (e.target.id === "form-codice") {
+    e.preventDefault();
+    ui.codice.inCorso = true; ui.codice.errore = ""; render();
+    try {
+      await sync.usaCodiceCollegamento($("#codice-incolla").value);
+      ui.codice = { generato: "", errore: "", inCorso: false, mostraIncolla: false };
+      avvisa("Collegato! Sincronizzo i dati.");
+    } catch (err) {
+      ui.codice.errore = err.message || String(err);
+    } finally {
+      ui.codice.inCorso = false; render();
     }
   } else if (e.target.id === "form-frase") {
     e.preventDefault();

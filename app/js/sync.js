@@ -104,11 +104,55 @@ export async function esci() {
   store.aggiornaInfoSync({ utenteId: null, ultimaSyncImpegni: null, ultimaSyncChiusure: null, ultimaSyncImpostazioni: null });
 }
 
+// ---------------------- collegamento dell'app installata ----------------------
+// Su iPhone l'app aggiunta alla schermata Home non condivide la sessione con
+// Safari. Da Safari si genera un codice (la sessione corrente, codificata) e
+// lo si incolla nell'app installata. I token di aggiornamento di Supabase
+// ruotano e non possono essere usati da due parti: chi genera il codice
+// viene scollegato in locale, così non prova a riusarli.
+
+export function codificaCodice(sessione) {
+  const json = JSON.stringify({ a: sessione.access_token, r: sessione.refresh_token });
+  return btoa(unescape(encodeURIComponent(json))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export function decodificaCodice(codice) {
+  const pulito = String(codice || "").replace(/\s+/g, "");
+  if (!pulito) throw new Error("Incolla il codice.");
+  try {
+    const b64 = pulito.replace(/-/g, "+").replace(/_/g, "/");
+    const dati = JSON.parse(decodeURIComponent(escape(atob(b64))));
+    if (!dati.a || !dati.r) throw new Error();
+    return { access_token: dati.a, refresh_token: dati.r };
+  } catch {
+    throw new Error("Codice non valido: copialo per intero.");
+  }
+}
+
+export async function creaCodiceCollegamento() {
+  if (!client) throw new Error("Sincronizzazione non configurata");
+  const { data } = await client.auth.getSession();
+  if (!data?.session) throw new Error("Non sei collegato.");
+  const codice = codificaCodice(data.session);
+  await client.auth.signOut({ scope: "local" });
+  return codice;
+}
+
+export async function usaCodiceCollegamento(codice) {
+  if (!client) throw new Error("Sincronizzazione non configurata");
+  const tokens = decodificaCodice(codice);
+  const r1 = await client.auth.setSession(tokens);
+  if (r1.error) throw new Error(traduci(r1.error.message));
+  const r2 = await client.auth.refreshSession();
+  if (r2.error) throw new Error(traduci(r2.error.message));
+}
+
 function traduci(msg = "") {
   const m = msg.toLowerCase();
   if (m.includes("rate limit") || m.includes("security purposes")) return "Troppi tentativi: aspetta qualche minuto e riprova.";
   if (m.includes("invalid") && m.includes("otp")) return "Codice non valido o scaduto.";
   if (m.includes("expired")) return "Codice o link scaduto: richiedine uno nuovo.";
+  if (m.includes("already used") || m.includes("refresh token")) return "Codice già usato o non più valido: generane uno nuovo da Safari.";
   if (m.includes("invalid email")) return "Indirizzo email non valido.";
   if (m.includes("fetch")) return "Nessuna connessione.";
   return msg;

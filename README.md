@@ -78,13 +78,17 @@ Serve una volta sola, circa dieci minuti.
 4. **Authentication → URL Configuration**:
    - *Site URL*: l'indirizzo dell'app, es. `https://<utente>.github.io/riepilogo-impegni/`
    - *Redirect URLs*: aggiungi lo stesso indirizzo (e `http://localhost:8787/` se la provi in locale).
-5. **Authentication → Email Templates → Magic Link**: aggiungi nel corpo
-   una riga con il codice, così puoi accedere anche dall'app installata
-   senza passare dal browser:
+5. *(Facoltativo, richiede un server SMTP tuo)* **Authentication → Emails →
+   Magic link**: se hai configurato un invio email personalizzato (Brevo,
+   Resend...) puoi aggiungere nel corpo una riga con il codice a 6 cifre,
+   che l'app accetta al posto del link:
 
    ```html
    <p>Oppure inserisci questo codice nell'app: <strong>{{ .Token }}</strong></p>
    ```
+
+   Senza SMTP personalizzato Supabase non permette di modificare l'email:
+   per l'app installata su iPhone usa il collegamento con codice descritto sotto.
 
 6. **Project Settings → API**: copia *Project URL* e la chiave *anon public*
    e incollale in `app/config.js`:
@@ -105,6 +109,22 @@ Dopo il primo accesso su un dispositivo tutto il locale viene caricato sul
 server; sugli altri dispositivi basta accedere con la stessa email. Offline
 si continua a lavorare e le modifiche partono appena torna la rete. In caso
 di modifica dello stesso impegno da due parti, vince l'ultima salvata.
+
+### App installata su iPhone
+
+Su iPhone l'app aggiunta alla schermata Home ha una memoria separata da
+Safari: il link di accesso apre Safari e il collegamento resta lì. Per
+portarlo nell'app installata:
+
+1. In Safari fai l'accesso con il link via email.
+2. Sempre in Safari, **Impostazioni → Sincronizzazione → Collega l'app
+   installata → Genera codice**, poi **Copia il codice**. Safari viene
+   scollegato (i token di Supabase non possono essere usati da due parti).
+3. Apri l'app installata, **Impostazioni → Sincronizzazione → Hai un codice
+   da Safari?**, incolla e conferma.
+
+Si fa una volta sola per dispositivo. Su Android non serve: l'app installata
+da Chrome condivide già l'accesso con Chrome.
 
 Limite del piano gratuito da sapere: Supabase invia poche email di accesso
 all'ora (3-4). La sessione però resta valida a lungo, quindi si accede
