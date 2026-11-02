@@ -128,6 +128,24 @@ export function arretrati(oggi = oggiISO(), maxGiorni = 60) {
     .sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
 }
 
+/** Impegni "entro una data" non ancora fatti, con scadenza futura (quelli di oggi stanno nella lista del giorno). */
+export function inScadenza(oggi = oggiISO()) {
+  return tutti().filter((i) => i.scadenza && !i.fatto && i.data > oggi)
+    .sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : ordina([a, b])[0] === a ? -1 : 1));
+}
+
+/** Agenda: impegni da oggi in avanti raggruppati per giorno, senza limiti di tempo. */
+export function agenda(oggi = oggiISO(), { conFatti = false } = {}) {
+  const perGiorno = new Map();
+  for (const i of tutti()) {
+    if (i.data < oggi) continue;
+    if (!conFatti && i.fatto) continue;
+    if (!perGiorno.has(i.data)) perGiorno.set(i.data, []);
+    perGiorno.get(i.data).push(i);
+  }
+  return [...perGiorno.keys()].sort().map((data) => ({ data, impegni: ordina(perGiorno.get(data)) }));
+}
+
 export function inIntervallo(da, a) {
   return tutti().filter((i) => i.data >= da && i.data <= a);
 }
@@ -147,6 +165,7 @@ function pulisciCampi(campi) {
   if (campi.tipo !== undefined) out.tipo = TIPI.includes(campi.tipo) ? campi.tipo : "Personale";
   if (campi.note !== undefined) out.note = String(campi.note || "").trim().slice(0, 2000) || null;
   if (campi.ricorrenza !== undefined) out.ricorrenza = normalizzaRicorrenza(campi.ricorrenza);
+  if (campi.scadenza !== undefined) out.scadenza = !!campi.scadenza;
   return out;
 }
 
@@ -155,7 +174,7 @@ export function crea(campi) {
   const i = {
     id: uuid(),
     titolo: "(senza titolo)", data: oggiISO(), ora: null, priorita: "Media", tipo: "Personale",
-    note: null, ricorrenza: null, serie_id: null, prossimo_creato: null,
+    note: null, ricorrenza: null, serie_id: null, prossimo_creato: null, scadenza: false,
     fatto: false, fatto_il: null, eliminato: false,
     creato_il: ora, aggiornato_il: ora,
     ...pulisciCampi(campi),

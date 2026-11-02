@@ -168,3 +168,26 @@ test("parte del giorno: tolta dal titolo solo se l'ora è nota", () => {
   r = analizza("Serata cinema", OGGI);
   assert.equal(r.titolo, "Serata cinema");
 });
+
+test("scadenze: 'entro' e sinonimi rendono la data un limite", () => {
+  let r = analizza("pagare bollo entro venerdì", OGGI);
+  assert.equal(r.scadenza, true);
+  assert.equal(r.data, "2026-10-09");
+  assert.equal(r.titolo, "Pagare bollo");
+  r = analizza("consegnare relazione entro il 15", OGGI);
+  assert.equal(r.scadenza, true);
+  assert.equal(r.data, "2026-10-15");
+  assert.equal(r.titolo, "Consegnare relazione");
+  r = analizza("iscrizione corso scadenza domani", OGGI);
+  assert.equal(r.scadenza, true);
+  assert.equal(r.titolo, "Iscrizione corso");
+  r = analizza("rinnovo non oltre il 3 novembre", OGGI);
+  assert.equal(r.scadenza, true);
+  assert.equal(r.data, "2026-11-03");
+  assert.equal(r.titolo, "Rinnovo");
+  r = analizza("dentista venerdì alle 15", OGGI);
+  assert.equal(r.scadenza, false);
+  r = analizza("entrare in casa", OGGI);
+  assert.equal(r.scadenza, false, "'entrare' non è 'entro'");
+  assert.equal(r.titolo, "Entrare in casa");
+});

@@ -30,7 +30,7 @@ const dormi = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Server finto: tre tabelle, trigger su sincronizzato_il, auth con token che ruotano. */
 function creaServer() {
   const tabelle = { impegni: new Map(), chiusure: new Map(), impostazioni: new Map() };
-  const stato = { colonnaSync: true, tabelleCreate: true };
+  const stato = { colonnaSync: true, tabelleCreate: true, colonnaScadenza: true };
   let tick = Date.now();
   const adesso = () => new Date(tick++).toISOString();
   const chiave = (t, r) => (t === "impegni" ? r.id : t === "chiusure" ? `${r.user_id}|${r.data}` : r.user_id);
@@ -62,7 +62,11 @@ function creaServer() {
     }
     async upsert(righe) {
       if (!stato.tabelleCreate) return { error: { message: `relation "public.${this.t}" does not exist` } };
-      for (const r of Array.isArray(righe) ? righe : [righe]) {
+      const lista = Array.isArray(righe) ? righe : [righe];
+      if (this.t === "impegni" && !stato.colonnaScadenza && lista.some((r) => "scadenza" in r)) {
+        return { error: { message: "Could not find the 'scadenza' column of 'impegni' in the schema cache" } };
+      }
+      for (const r of lista) {
         const k = chiave(this.t, r);
         const prima = tabelle[this.t].get(k) || {};
         tabelle[this.t].set(k, { ...prima, ...JSON.parse(JSON.stringify(r)), sincronizzato_il: adesso() });
@@ -319,4 +323,28 @@ test("sincronizzazioni sovrapposte: la seconda si accoda, non si perde", async (
   await dormi(10);
   await sync._attendiSync();
   assert.equal(server.tabelle.impegni.size, 1, "la creazione avvenuta durante la sync è stata spinta dal giro accodato");
+});
+
+test("scadenze: il contrassegno viaggia; senza colonna il resto si sincronizza e compare l'avviso", async () => {
+  const server = creaServer();
+  const A = await usaDispositivo("S1", server);
+  await accedi(A, "s@test.it");
+  const s = store.crea({ titolo: "Bollo", data: aggiungiGiorni(OGGI, 5), scadenza: true });
+  await sync.sincronizza();
+  assert.equal(server.tabelle.impegni.get(s.id).scadenza, true);
+  await usaDispositivo("S2", server);
+  await accedi(dispositivi.S2.client, "s@test.it");
+  assert.equal(store.perId(s.id).scadenza, true);
+
+  // database non aggiornato
+  server.stato.colonnaScadenza = false;
+  store.crea({ titolo: "Altro", data: OGGI, scadenza: true });
+  await sync.sincronizza();
+  assert.equal(sync.statoSync.stato, "collegato", "la sincronizzazione non si blocca");
+  assert.match(sync.statoSync.messaggio, /aggiornamento-3\.sql/);
+  assert.equal(server.tabelle.impegni.size, 2, "la riga è arrivata comunque, senza il contrassegno");
+  assert.equal(store.pendenti().impegni.length, 0);
+  server.stato.colonnaScadenza = true;
+  await sync.sincronizza();
+  assert.equal(sync.statoSync.messaggio, "");
 });

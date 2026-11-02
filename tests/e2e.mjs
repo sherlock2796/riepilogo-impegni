@@ -112,7 +112,10 @@ const idPerTitolo = (p, t) => p.$eval(`#vista .riga:has(.titolo:text-is("${t}"))
   controlla("oggi: intestazione con la data", (await p.textContent("h1")).includes("Sabato 3"));
   controlla("oggi: frase per giornata vuota", (await p.textContent(".motto .saluto")).trim() === "Oggi" && (await p.textContent(".motto .frase")).length > 10);
   controlla("oggi: nessun impegno", (await p.textContent(".vuoto")).includes("Niente in programma"));
-  controlla("pill sync: solo locale senza config", (await p.textContent("#stato-sync-pill")).includes("Solo locale"));
+  const conConfig = await p.evaluate(() => !!(window.CONFIG && window.CONFIG.supabaseUrl));
+  await p.waitForTimeout(800);
+  const pill = (await p.textContent("#stato-sync-pill")).trim();
+  controlla("pill sync coerente con config.js", conConfig ? !pill.includes("Solo locale") : pill.includes("Solo locale"), pill);
   await p.screenshot({ path: join(SCHERMATE, "01-vuoto.png"), fullPage: true });
 
   // --- inserimento in linguaggio naturale
@@ -124,6 +127,17 @@ const idPerTitolo = (p, t) => p.$eval(`#vista .riga:has(.titolo:text-is("${t}"))
   await aggiungi(p, "stretching, sport", { dataAttesa: "2026-10-03" });
   await aggiungi(p, "riordinare cantina domani con calma", { dataAttesa: "2026-10-04" });
   await aggiungi(p, "vitamine ogni giorno", { dataAttesa: "2026-10-03" });
+  // scadenza in linguaggio naturale
+  await p.click("#fab");
+  await p.waitForSelector("#f-nl");
+  await p.fill("#f-nl", "pagare bollo entro venerdì");
+  controlla("scadenza: il parser attiva 'Entro una data'", await p.$eval("[data-gruppo=modo] .chip.attivo", (e) => e.dataset.val) === "scadenza");
+  controlla("scadenza: l'etichetta della data diventa 'Entro il'", (await p.textContent("#f-data-label")).trim() === "Entro il");
+  controlla("scadenza: anteprima con clessidra", (await p.textContent("#f-interpretazione")).includes("entro venerdì"));
+  await p.click("#form-impegno button[type=submit]");
+  await p.waitForSelector("#sheet", { state: "hidden" });
+  controlla("scadenza: compare nel blocco 'In scadenza', non in Oggi", (await titoli(p, "#sezione-scadenze")).join() === "Pagare bollo" && !(await titoli(p, "#sezione-oggi")).includes("Pagare bollo"));
+  controlla("scadenza: conto alla rovescia", (await p.textContent("#sezione-scadenze .scad")).includes("ancora 6 giorni"));
   const oggiLista = await titoli(p, "#sezione-oggi");
   controlla("oggi: 5 impegni in lista", oggiLista.length === 5, oggiLista.join(" / "));
   controlla("oggi: ordinati con ora prima e poi per priorità", oggiLista[0] === "Chiamare mamma" && oggiLista[1] === "Pagare bolletta luce", oggiLista.join(" / "));
@@ -205,6 +219,7 @@ const idPerTitolo = (p, t) => p.$eval(`#vista .riga:has(.titolo:text-is("${t}"))
 
   // --- settimana
   await vai(p, "#/settimana");
+  if ((await p.$(".segmento button.attivo[data-val=agenda]"))) await p.click(".segmento [data-val=settimana]");
   controlla("settimana: intestazione 28 set – 4 ott", (await p.textContent("h1")).includes("28 set") && (await p.textContent("h1")).includes("4 ott"));
   await p.click(".giorno-pill[data-data='2026-10-04']");
   const dom = await titoli(p, ".giorno-dettaglio");
@@ -225,6 +240,23 @@ const idPerTitolo = (p, t) => p.$eval(`#vista .riga:has(.titolo:text-is("${t}"))
   await p.click("[data-azione=settimana-oggi]");
   controlla("settimana: 'Torna a oggi' funziona", (await p.textContent(".settimana-barra")).includes("Questa settimana"));
   await p.screenshot({ path: join(SCHERMATE, "06-settimana.png"), fullPage: true });
+
+  // --- agenda
+  await p.click(".segmento [data-val=agenda]");
+  await p.waitForSelector(".agenda-giorno, .vuoto");
+  controlla("agenda: intestazione", (await p.textContent(".testata .sopra")).trim() === "Agenda");
+  const gruppi = await p.$$eval(".agenda-giorno", (e) => e.map((x) => x.dataset.data));
+  controlla("agenda: gruppi per giorno in ordine", gruppi.length >= 3 && gruppi.every((d, k) => k === 0 || d > gruppi[k - 1]), gruppi.join(","));
+  controlla("agenda: la scadenza sta sotto il suo giorno limite con l'etichetta", (await p.textContent(".agenda-giorno[data-data='2026-10-09']")).includes("Pagare bollo") && (await p.textContent(".agenda-giorno[data-data='2026-10-09'] .scad")).includes("entro"));
+  controlla("agenda: niente fatti di default", !(await titoli(p, ".agenda-giorno[data-data='2026-10-03']")).includes("Pagare bolletta luce"));
+  await p.click("[data-azione=agenda-fatti]");
+  controlla("agenda: con l'interruttore compaiono anche i fatti", (await titoli(p, ".agenda-giorno[data-data='2026-10-03']")).includes("Pagare bolletta luce"));
+  await p.click("[data-azione=agenda-fatti]");
+  await p.screenshot({ path: join(SCHERMATE, "06b-agenda.png"), fullPage: true });
+  await p.reload({ waitUntil: "domcontentloaded" });
+  await p.waitForSelector("#vista .testata");
+  controlla("agenda: la scelta resta dopo il ricarico", (await p.textContent(".testata .sopra")).trim() === "Agenda");
+  await p.click(".segmento [data-val=settimana]");
 
   // --- statistiche
   await vai(p, "#/statistiche");

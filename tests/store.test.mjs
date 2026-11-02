@@ -233,3 +233,44 @@ test("date: DST e differenze", async () => {
   assert.equal(D.ritardo("2026-10-02", "2026-10-03"), "da ieri");
   assert.equal(D.ritardo("2026-09-26", "2026-10-03"), "da una settimana");
 });
+
+test("scadenze: blocco 'in scadenza', giorno limite e serie", () => {
+  const fraTre = aggiungiGiorni(OGGI, 3);
+  const s = store.crea({ titolo: "Bollo", data: fraTre, scadenza: true });
+  const fissoFuturo = store.crea({ titolo: "Dentista", data: fraTre });
+  assert.equal(s.scadenza, true);
+  assert.equal(fissoFuturo.scadenza, false);
+  assert.deepEqual(store.inScadenza(OGGI).map((i) => i.titolo), ["Bollo"], "solo le scadenze future, non gli impegni fissi");
+  assert.equal(store.perData(OGGI).length, 0, "prima del giorno limite non sta nella lista del giorno");
+  assert.ok(store.perData(fraTre).some((i) => i.id === s.id), "al giorno limite è nella lista");
+  // fatto in anticipo: nessun giorno si rompe, il giorno limite risulta pieno
+  store.segnaFatto(s.id, true);
+  assert.equal(store.inScadenza(OGGI).length, 0);
+  assert.equal(store.esitoGiorno(OGGI).totali, 0, "non pesa su oggi");
+  store.segnaFatto(fissoFuturo.id, true);
+  assert.equal(store.esitoGiorno(fraTre).pieno, true);
+  // scadenza passata e non fatta: arretrato e giorno rotto
+  const ieri = aggiungiGiorni(OGGI, -1);
+  const v = store.crea({ titolo: "Vecchia scadenza", data: ieri, scadenza: true });
+  assert.ok(store.arretrati(OGGI).some((i) => i.id === v.id));
+  assert.equal(store.esitoGiorno(ieri).rotto, true);
+  // ricorrenza + scadenza: la successiva eredita il contrassegno
+  const r = store.crea({ titolo: "Report", data: OGGI, scadenza: true, ricorrenza: { tipo: "settimane", ogni: 1 } });
+  const { creato } = store.segnaFatto(r.id, true);
+  assert.equal(creato.scadenza, true);
+  assert.equal(creato.data, aggiungiGiorni(OGGI, 7));
+});
+
+test("agenda: raggruppata per giorno da oggi in poi, con o senza fatti", () => {
+  store.crea({ titolo: "Passato", data: aggiungiGiorni(OGGI, -2) });
+  const a = store.crea({ titolo: "Oggi fatto", data: OGGI });
+  store.segnaFatto(a.id, true);
+  store.crea({ titolo: "Oggi", data: OGGI, ora: "09:00" });
+  store.crea({ titolo: "Fra un mese", data: aggiungiGiorni(OGGI, 30) });
+  store.crea({ titolo: "Domani", data: aggiungiGiorni(OGGI, 1) });
+  let g = store.agenda(OGGI);
+  assert.deepEqual(g.map((x) => x.data), [OGGI, aggiungiGiorni(OGGI, 1), aggiungiGiorni(OGGI, 30)]);
+  assert.deepEqual(g[0].impegni.map((i) => i.titolo), ["Oggi"]);
+  g = store.agenda(OGGI, { conFatti: true });
+  assert.deepEqual(g[0].impegni.map((i) => i.titolo), ["Oggi", "Oggi fatto"]);
+});

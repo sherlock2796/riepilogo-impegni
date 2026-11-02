@@ -204,6 +204,7 @@ function traduci(msg = "") {
   if (m.includes("already used") || m.includes("refresh token")) return "Sessione non più valida: accedi di nuovo.";
   if (m.includes("invalid email")) return "Indirizzo email non valido.";
   if (m.includes("permission denied")) return "Permessi mancanti sul database: esegui supabase/aggiornamento-2.sql su Supabase (vedi README).";
+  if (m.includes("scadenza")) return "Il database va aggiornato per le scadenze: esegui supabase/aggiornamento-3.sql (vedi README).";
   if (m.includes("sincronizzato_il")) return "Il database Supabase va aggiornato: esegui supabase/aggiornamento-1.sql (vedi README).";
   if (m.includes("does not exist") && m.includes("relation")) return "Tabelle mancanti su Supabase: esegui supabase/schema.sql (vedi README).";
   if (m.includes("jwt") || m.includes("session")) return "Sessione scaduta: accedi di nuovo.";
@@ -220,10 +221,11 @@ export function sincronizza() {
   if (promessaSync) { richiestaInCoda = true; return promessaSync; }
   promessaSync = (async () => {
     emetti({ stato: "in-corso" });
+    avvisoSchema = "";
     try {
       await pull();
       await push();
-      emetti({ stato: "collegato", messaggio: "", ultimaSync: new Date().toISOString() });
+      emetti({ stato: "collegato", messaggio: avvisoSchema, ultimaSync: new Date().toISOString() });
     } catch (e) {
       console.error("Sync fallita", e);
       emetti({ stato: "errore", messaggio: traduci(e.message || String(e)) });
@@ -286,7 +288,12 @@ async function push() {
   const p = store.pendenti();
   if (p.impegni.length) {
     const righe = p.impegni.map((i) => aRigaImpegno(i, utente.id));
-    const { error } = await client.from("impegni").upsert(righe, { onConflict: "id" });
+    let { error } = await client.from("impegni").upsert(righe, { onConflict: "id" });
+    if (error && /scadenza/i.test(error.message || "")) {
+      // Database non ancora aggiornato: sincronizzo tutto il resto e avviso.
+      avvisoSchema = "Il database va aggiornato per le scadenze: esegui supabase/aggiornamento-3.sql (vedi README).";
+      ({ error } = await client.from("impegni").upsert(righe.map(({ scadenza, ...r }) => r), { onConflict: "id" }));
+    }
     if (error) throw error;
     store.segnaSincronizzati({ impegni: p.impegni.map((i) => i.id) });
   }
@@ -307,7 +314,8 @@ async function push() {
 }
 
 const COLONNE = ["id", "titolo", "data", "ora", "priorita", "tipo", "note", "ricorrenza", "serie_id",
-  "prossimo_creato", "fatto", "fatto_il", "eliminato", "creato_il", "aggiornato_il"];
+  "prossimo_creato", "scadenza", "fatto", "fatto_il", "eliminato", "creato_il", "aggiornato_il"];
+let avvisoSchema = "";
 
 function aRigaImpegno(i, userId) {
   const r = { user_id: userId };
@@ -320,6 +328,7 @@ function daRigaImpegno(r) {
   for (const c of COLONNE) i[c] = r[c] === undefined ? null : r[c];
   i.fatto = !!i.fatto;
   i.eliminato = !!i.eliminato;
+  i.scadenza = !!i.scadenza;
   i.fatto_il = normalizzaTs(i.fatto_il);
   i.creato_il = normalizzaTs(i.creato_il);
   i.aggiornato_il = normalizzaTs(i.aggiornato_il);

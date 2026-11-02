@@ -327,6 +327,18 @@ main {
 #toast.ko { background: var(--alta); color: #fff; }
 #coriandoli { position: fixed; inset: 0; pointer-events: none; z-index: 70; }
 
+/* ----------------------------- scadenze e agenda --------------------------- */
+.scad { color: var(--ambra); font-weight: 700; white-space: nowrap; }
+.scad.urgente { color: var(--alta); }
+.scad svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
+.riga.fatta .scad { color: var(--testo-3); }
+.segmento { display: inline-flex; background: var(--carta-2); border-radius: 999px; padding: 4px; gap: 4px; margin: 0 0 14px; }
+.segmento button { padding: 8px 18px; border-radius: 999px; font-weight: 800; font-size: 14px; color: var(--testo-2); transition: all .15s; }
+.segmento button.attivo { background: var(--carta); color: var(--inchiostro); box-shadow: var(--ombra); }
+.agenda-strumenti { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 2px 4px; font-size: 14.5px; font-weight: 700; color: var(--testo-2); }
+.mese-caption { font-family: var(--font-display); font-size: 24px; font-weight: 600; color: var(--testo-2); margin: 34px 2px -8px; }
+.agenda-giorno .intestazione .conta { text-transform: none; letter-spacing: 0; font-weight: 700; }
+
 /* ----------------------------- settimana ---------------------------------- */
 .settimana-barra { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 14px; }
 .settimana-barra .titolo-sett { font-family: var(--font-display); font-size: 20px; font-weight: 600; }

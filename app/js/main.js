@@ -7,7 +7,7 @@ import { scegliFrase, saluto, BASE, MOMENTI } from "./frasi.js";
 import { descrivi as descriviRicorrenza, allineaData } from "./ricorrenze.js";
 import * as D from "./date.js";
 
-const VERSIONE_APP = "1.0.8";
+const VERSIONE_APP = "1.1.0";
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -18,6 +18,7 @@ const ICONE = {
   nota: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12l-4 4H4z"/><path d="M8 9h8M8 13h5"/></svg>',
   sinistra: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
   destra: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>',
+  clessidra: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12M6 22h12M7 2v4a5 5 0 0 0 10 0V2M7 22v-4a5 5 0 0 1 10 0v4"/></svg>',
 };
 
 const oggi = () => D.oggiISO();
@@ -27,6 +28,8 @@ const ui = {
   settimanaLunedi: D.lunediDi(oggi()),
   giornoSelezionato: oggi(),
   focusMostraTutti: false,
+  calendario: localStorage.getItem("calendario") === "agenda" ? "agenda" : "settimana",
+  agendaFatti: false,
   installPrompt: null,
   login: { email: "", inviato: false, errore: "", inCorso: false, ok: "", mostraLink: false, offriRegistrazione: false },
   frasiMomentoAperto: null,
@@ -43,7 +46,7 @@ function avvia() {
   sync.subscribe(aggiornaStatoSync);
   sync.init();
 
-  $("#fab").addEventListener("click", () => apriFormImpegno({ dataIniziale: ui.vista === "settimana" ? ui.giornoSelezionato : ui.oggi }));
+  $("#fab").addEventListener("click", () => apriFormImpegno({ dataIniziale: ui.vista === "settimana" && ui.calendario === "settimana" ? ui.giornoSelezionato : ui.oggi }));
   $("#vista").addEventListener("click", gestisciClick);
   $("#vista").addEventListener("change", gestisciChange);
   $("#vista").addEventListener("toggle", (e) => {
@@ -230,6 +233,12 @@ function vistaOggi() {
   }
   html += `</section>`;
 
+  const scad = store.inScadenza(g);
+  if (scad.length) {
+    html += `<section class="sezione" id="sezione-scadenze"><div class="intestazione"><h2>In scadenza</h2><span class="conta">${scad.length}</span></div>
+      <div class="carta">${scad.map((i) => rigaImpegno(i)).join("")}</div></section>`;
+  }
+
   const ora = new Date().getHours();
   if (chiusa) {
     html += `<div class="chiusura-card fatta"><span class="luna">🌙</span><div><div class="t">Giornata chiusa</div><div class="d">${chiusa.fatti} su ${chiusa.totali} fatti${chiusa.slittati ? `, ${chiusa.slittati} ${chiusa.slittati === 1 ? "spostato" : "spostati"} a domani` : ""}. A domani!</div></div></div>`;
@@ -249,7 +258,18 @@ function rigaImpegno(i, { compatta = false, mostraRitardo = false, mostraData = 
   const meta = [];
   if (mostraData) meta.push(`<span>${h(D.etichettaRelativa(i.data, ui.oggi))}</span>`);
   if (i.ora) meta.push(`<span class="ora">${h(i.ora)}</span>`);
-  if (mostraRitardo) meta.push(`<span class="ritardo">${h(D.ritardo(i.data, ui.oggi))}</span>`);
+  if (mostraRitardo && !i.scadenza) meta.push(`<span class="ritardo">${h(D.ritardo(i.data, ui.oggi))}</span>`);
+  if (i.scadenza) {
+    let testo;
+    const quando = D.etichettaRelativa(i.data, ui.oggi).toLowerCase();
+    if (i.fatto) testo = `entro ${quando}`;
+    else if (i.data > ui.oggi) {
+      const n = D.differenzaGiorni(ui.oggi, i.data);
+      testo = compatta ? `entro ${quando}` : `entro ${quando} · ${n === 1 ? "ancora 1 giorno" : `ancora ${n} giorni`}`;
+    } else if (i.data === ui.oggi) testo = "scade oggi";
+    else testo = `scaduto ${D.ritardo(i.data, ui.oggi)}`;
+    meta.push(`<span class="scad ${!i.fatto && i.data <= ui.oggi ? "urgente" : ""}">${ICONE.clessidra}${h(testo)}</span>`);
+  }
   meta.push(`<span class="pri ${i.priorita}" title="Priorità ${i.priorita}"></span>`);
   meta.push(`<span class="etichetta-tipo ${i.tipo}">${h(i.tipo)}</span>`);
   if (i.ricorrenza) meta.push(`<span title="${h(descriviRicorrenza(i.ricorrenza))}">${ICONE.ripeti}${compatta ? "" : h(descriviRicorrenza(i.ricorrenza))}</span>`);
@@ -264,7 +284,51 @@ function rigaImpegno(i, { compatta = false, mostraRitardo = false, mostraData = 
 
 // ------------------------------ vista: settimana ------------------------------
 
+function segmentoCalendario() {
+  return `<div class="segmento" role="tablist">
+    <button role="tab" class="${ui.calendario === "settimana" ? "attivo" : ""}" data-azione="calendario" data-val="settimana">Settimana</button>
+    <button role="tab" class="${ui.calendario === "agenda" ? "attivo" : ""}" data-azione="calendario" data-val="agenda">Agenda</button>
+  </div>`;
+}
+
+function vistaAgenda() {
+  const g = ui.oggi;
+  const gruppi = store.agenda(g, { conFatti: ui.agendaFatti });
+  const arr = store.arretrati(g);
+  const totale = gruppi.reduce((s, x) => s + x.impegni.filter((i) => !i.fatto).length, 0);
+  let html = `
+    <header class="testata"><div><div class="sopra">Agenda</div><h1>Tutto quel che viene</h1>
+      <p class="muto piccolo" style="margin-top:4px">${totale ? `${totale} ${totale === 1 ? "impegno" : "impegni"} in programma` : "Niente in programma"}${arr.length ? ` · ${arr.length} ${arr.length === 1 ? "arretrato" : "arretrati"}` : ""}</p></div>${pillSync()}</header>
+    ${segmentoCalendario()}
+    <div class="agenda-strumenti"><span>Mostra anche i fatti</span><button class="interruttore ${ui.agendaFatti ? "on" : ""}" role="switch" aria-checked="${ui.agendaFatti}" data-azione="agenda-fatti"></button></div>`;
+  if (arr.length) {
+    html += `<section class="sezione" id="agenda-arretrati"><div class="intestazione"><h2>Arretrati</h2><span class="conta">${arr.length}</span></div>
+      <div class="carta ambra">${arr.map((i) => rigaImpegno(i, { mostraRitardo: true, rapide: `
+        <div class="azioni-rapide">
+          <button class="bottone-mini" data-azione="rimanda" data-id="${i.id}" data-giorni="0">Oggi</button>
+          <button class="bottone-mini" data-azione="rimanda" data-id="${i.id}" data-giorni="1">Domani</button>
+        </div>` })).join("")}</div></section>`;
+  }
+  if (!gruppi.length) {
+    html += `<div class="carta" style="margin-top:14px"><div class="vuoto"><strong>Agenda vuota</strong>Il futuro è tutto da scrivere. Tocca + per cominciare.</div></div>`;
+  }
+  let mesePrec = `${D.daISO(g).getFullYear()}-${D.daISO(g).getMonth()}`;
+  for (const gr of gruppi) {
+    const d = D.daISO(gr.data);
+    const mese = `${d.getFullYear()}-${d.getMonth()}`;
+    if (mese !== mesePrec) {
+      const stessoAnno = d.getFullYear() === D.daISO(g).getFullYear();
+      html += `<div class="mese-caption">${D.MESI[d.getMonth()][0].toUpperCase() + D.MESI[d.getMonth()].slice(1)}${stessoAnno ? "" : " " + d.getFullYear()}</div>`;
+      mesePrec = mese;
+    }
+    html += `<section class="sezione agenda-giorno" data-data="${gr.data}"><div class="intestazione"><h2>${h(D.etichettaRelativa(gr.data, g))}</h2><span class="conta">${h(D.formattaLunga(gr.data))}</span></div>
+      <div class="carta">${gr.impegni.map((i) => rigaImpegno(i)).join("")}</div></section>`;
+  }
+  return html;
+}
+
 function vistaSettimana() {
+  if (ui.calendario === "agenda") return vistaAgenda();
   const lun = ui.settimanaLunedi;
   const giorni = Array.from({ length: 7 }, (_, k) => D.aggiungiGiorni(lun, k));
   const dom = giorni[6];
@@ -280,6 +344,7 @@ function vistaSettimana() {
   let html = `
     <header class="testata"><div><div class="sopra">Settimana</div><h1>${h(titolo)}</h1>
       <p class="muto piccolo" style="margin-top:4px">${tot ? `${fat} su ${tot} fatti` : "Nessun impegno in questa settimana"}</p></div>${pillSync()}</header>
+    ${segmentoCalendario()}
     <div class="settimana-barra">
       <button class="freccia" data-azione="settimana" data-delta="-1" aria-label="Settimana precedente">${ICONE.sinistra}</button>
       ${eCorrente ? `<span class="titolo-sett">Questa settimana</span>` : `<button class="bottone-mini" data-azione="settimana-oggi">Torna a oggi</button>`}
@@ -408,6 +473,7 @@ function vistaImpostazioni() {
   } else {
     html += `<div class="voce"><div><div class="t">${h(s.utente?.email || "")}</div><div class="d">${s.stato === "errore" ? "Errore: " + h(s.messaggio) : s.stato === "offline" ? "Offline: sincronizzo appena torna la rete" : s.ultimaSync ? "Ultima sincronizzazione alle " + D.oraAdesso(new Date(s.ultimaSync)) : "Collegato"}</div></div>
       <button class="bottone-mini" data-azione="sync-ora">Sincronizza ora</button></div>`;
+    if (s.stato === "collegato" && s.messaggio) html += `<div class="voce" style="display:block"><div class="avviso">${h(s.messaggio)}</div></div>`;
     if (s.recupero) html += `<div class="voce" style="display:block"><div class="avviso ok">Sei entrato con il link di recupero: imposta ora la nuova password qui sotto.</div></div>`;
     html += `<div class="voce" style="display:block">
       <div class="t">Password</div>
@@ -502,6 +568,8 @@ function gestisciClick(e) {
     case "settimana": ui.settimanaLunedi = D.aggiungiGiorni(ui.settimanaLunedi, 7 * Number(el.dataset.delta)); ui.giornoSelezionato = ui.settimanaLunedi === D.lunediDi(g) ? g : ui.settimanaLunedi; return render();
     case "settimana-oggi": ui.settimanaLunedi = D.lunediDi(g); ui.giornoSelezionato = g; return render();
     case "seleziona-giorno": ui.giornoSelezionato = el.dataset.data; return render();
+    case "calendario": ui.calendario = el.dataset.val === "agenda" ? "agenda" : "settimana"; localStorage.setItem("calendario", ui.calendario); return render();
+    case "agenda-fatti": ui.agendaFatti = !ui.agendaFatti; return render();
     case "toggle": { const k = el.dataset.chiave; store.aggiornaImpostazioni({ [k]: !store.impostazioni()[k] }); return; }
     case "sync-ora": return sync.sincronizza();
     case "esci": ui.login = { ...ui.login, errore: "", ok: "", offriRegistrazione: false }; return sync.esci().then(() => avvisa("Sei uscito. I dati restano qui."));
@@ -689,7 +757,7 @@ function tipoRicorrenzaUI(r) {
 
 function apriFormImpegno({ impegno = null, dataIniziale = ui.oggi } = {}) {
   const nuovo = !impegno;
-  const v = impegno || { titolo: "", data: dataIniziale, ora: null, priorita: "Media", tipo: "Personale", note: "", ricorrenza: null };
+  const v = impegno || { titolo: "", data: dataIniziale, ora: null, priorita: "Media", tipo: "Personale", note: "", ricorrenza: null, scadenza: false };
   const ricUI = tipoRicorrenzaUI(v.ricorrenza);
   const giorniSel = new Set(v.ricorrenza?.giorniSettimana || [D.giornoSettimana(v.data)]);
 
@@ -700,8 +768,11 @@ function apriFormImpegno({ impegno = null, dataIniziale = ui.oggi } = {}) {
         <input type="text" id="f-nl" placeholder="Es. dentista martedì alle 15, alta" enterkeyhint="done">
         <div class="interpretazione" id="f-interpretazione"></div></div>` : ""}
       <div class="campo"><label for="f-titolo">Titolo</label><input type="text" id="f-titolo" required maxlength="200" value="${h(v.titolo)}" placeholder="Cosa c'è da fare?"></div>
+      <div class="campo"><span class="lab">Quando</span><div class="chips" data-gruppo="modo">
+        <button type="button" class="chip ${v.scadenza ? "" : "attivo"}" data-val="giorno">In un giorno preciso</button>
+        <button type="button" class="chip ${v.scadenza ? "attivo" : ""}" data-val="scadenza">Entro una data</button></div></div>
       <div class="campo"><div class="due">
-        <div><label for="f-data">Quando</label><input type="date" id="f-data" required value="${h(v.data)}"></div>
+        <div><label for="f-data" id="f-data-label">${v.scadenza ? "Entro il" : "Giorno"}</label><input type="date" id="f-data" required value="${h(v.data)}"></div>
         <div><label for="f-ora">Ora</label><input type="time" id="f-ora" value="${h(v.ora || "")}"></div>
       </div></div>
       ${nuovo ? "" : `<div class="campo"><span class="lab">Rimanda</span><div class="chips">
@@ -763,8 +834,13 @@ function apriFormImpegno({ impegno = null, dataIniziale = ui.oggi } = {}) {
     if (gruppo) {
       $$(".chip", gruppo).forEach((c) => c.classList.toggle("attivo", c === chip));
       toccati.add(gruppo.dataset.gruppo);
+      if (gruppo.dataset.gruppo === "modo") aggiornaModoUI();
     }
   });
+  const aggiornaModoUI = () => {
+    const scad = $("[data-gruppo=modo] .chip.attivo", form)?.dataset.val === "scadenza";
+    $("#f-data-label", form).textContent = scad ? "Entro il" : "Giorno";
+  };
   ["f-titolo", "f-data", "f-ora"].forEach((id) => $("#" + id, form).addEventListener("input", () => toccati.add(id.slice(2))));
 
   if (nuovo) {
@@ -779,6 +855,10 @@ function apriFormImpegno({ impegno = null, dataIniziale = ui.oggi } = {}) {
       if (!toccati.has("ora")) $("#f-ora", form).value = r.ora || "";
       if (!toccati.has("priorita")) $$("[data-gruppo=priorita] .chip", form).forEach((c) => c.classList.toggle("attivo", c.dataset.val === r.priorita));
       if (!toccati.has("tipo")) $$("[data-gruppo=tipo] .chip", form).forEach((c) => c.classList.toggle("attivo", c.dataset.val === r.tipo));
+      if (!toccati.has("modo")) {
+        $$("[data-gruppo=modo] .chip", form).forEach((c) => c.classList.toggle("attivo", (c.dataset.val === "scadenza") === !!r.scadenza));
+        aggiornaModoUI();
+      }
       if (!toccati.has("ricorrenza")) {
         sel.value = tipoRicorrenzaUI(r.ricorrenza);
         $("#f-ric-ogni", form).value = r.ricorrenza?.ogni || 1;
@@ -788,7 +868,7 @@ function apriFormImpegno({ impegno = null, dataIniziale = ui.oggi } = {}) {
       }
       const pezzi = [];
       if (nl.value.trim()) {
-        pezzi.push(`<span class="tag">${h(D.etichettaRelativa(r.data, ui.oggi))}</span>`);
+        pezzi.push(`<span class="tag">${r.scadenza ? "⏳ entro " + h(D.etichettaRelativa(r.data, ui.oggi).toLowerCase()) : h(D.etichettaRelativa(r.data, ui.oggi))}</span>`);
         if (r.ora) pezzi.push(`<span class="tag">${h(r.ora)}</span>`);
         if (r.trovati.priorita) pezzi.push(`<span class="tag">${h(r.priorita)}</span>`);
         if (r.tipo !== "Personale" || r.trovati.tipo) pezzi.push(`<span class="tag">${h(r.tipo)}</span>`);
@@ -822,11 +902,12 @@ function apriFormImpegno({ impegno = null, dataIniziale = ui.oggi } = {}) {
       tipo: $("[data-gruppo=tipo] .chip.attivo", form)?.dataset.val || "Personale",
       note: $("#f-note", form).value,
       ricorrenza,
+      scadenza: $("[data-gruppo=modo] .chip.attivo", form)?.dataset.val === "scadenza",
     };
     if (!campi.titolo.trim()) { $("#f-titolo", form).focus(); return; }
     if (nuovo) {
       store.crea(campi);
-      avvisa(`Aggiunto per ${D.etichettaRelativa(data, ui.oggi).toLowerCase()}${campi.ora ? " alle " + campi.ora : ""}.`);
+      avvisa(campi.scadenza ? `Aggiunto, da fare entro ${D.etichettaRelativa(data, ui.oggi).toLowerCase()}.` : `Aggiunto per ${D.etichettaRelativa(data, ui.oggi).toLowerCase()}${campi.ora ? " alle " + campi.ora : ""}.`);
     } else {
       store.aggiorna(impegno.id, campi);
       avvisa("Salvato.");
@@ -859,7 +940,7 @@ function apriChiusura() {
     <p class="muto">${lista.length ? `Hai fatto <b>${fatti} su ${lista.length}</b>.` : "Oggi non c'era niente in lista."} ${nonFatti.length ? "Scegli cosa spostare a domani." : ""}</p>
     ${nonFatti.length ? `<div class="carta chiusura-lista" style="margin-top:14px">${nonFatti.map((i) => `
       <label class="riga"><input type="checkbox" class="sr-only" data-sposta="${i.id}" checked><span class="spunta" aria-hidden="true">${ICONE.spunta}</span>
-        <span class="corpo"><span class="titolo">${h(i.titolo)}</span><span class="meta"><span class="muto">sposta a domani</span></span></span></label>`).join("")}</div>
+        <span class="corpo"><span class="titolo">${h(i.titolo)}</span><span class="meta"><span class="muto">${i.scadenza ? "rinvia la scadenza a domani" : "sposta a domani"}</span></span></span></label>`).join("")}</div>
       <p class="muto piccolo" style="margin-top:8px">Quelli deselezionati restano su oggi, tra gli arretrati.</p>` : ""}
     <div class="form-azioni"><button class="bottone" id="conferma-chiusura">Chiudi la giornata</button></div>`);
 

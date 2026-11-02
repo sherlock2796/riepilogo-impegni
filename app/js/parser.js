@@ -46,7 +46,7 @@ export function analizza(testo, oggi = oggiISO()) {
   const originale = String(testo || "");
   const norm = normalizzaTesto(originale);
   const spans = [];
-  const trovati = { data: false, ora: false, priorita: false, tipo: false, ricorrenza: false };
+  const trovati = { data: false, ora: false, priorita: false, tipo: false, ricorrenza: false, scadenza: false };
 
   const libero = (a, b) => spans.every(([x, y]) => b <= x || a >= y);
   const prendi = (re) => {
@@ -59,7 +59,7 @@ export function analizza(testo, oggi = oggiISO()) {
     return null;
   };
 
-  let data = null, ora = null, priorita = null, tipo = null, ricorrenza = null;
+  let data = null, ora = null, priorita = null, tipo = null, ricorrenza = null, scadenza = false;
   const gsOggi = giornoSettimana(oggi);
   const prossimoGiorno = (g, includiOggi = false) => {
     let avanti = (g - gsOggi + 7) % 7;
@@ -168,6 +168,12 @@ export function analizza(testo, oggi = oggiISO()) {
   }
   if (data) trovati.data = true;
 
+  // --- scadenza: "entro venerdì", "scadenza il 15", "non oltre domani" ------------
+  if (data && (m = prendi(/\b(?:entro|scadenza|scade|non oltre|al massimo)\b/))) {
+    scadenza = true;
+    trovati.scadenza = true;
+  }
+
   // --- ora senza prefisso: "15:30" ---------------------------------------------
   if (!ora && (m = prendi(/\b(\d{1,2}):(\d{2})\b/))) {
     if (!applicaOra(Number(m[1]), Number(m[2]), undefined, "di mattina")) spans.pop();
@@ -216,5 +222,5 @@ export function analizza(testo, oggi = oggiISO()) {
   if (!data) data = oggi;
   if (ricorrenza) data = allineaData(data, ricorrenza) || data;
 
-  return { titolo, data, ora, priorita: priorita || "Media", tipo: tipo || "Personale", ricorrenza, trovati };
+  return { titolo, data, ora, priorita: priorita || "Media", tipo: tipo || "Personale", ricorrenza, scadenza, trovati };
 }

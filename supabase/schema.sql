@@ -14,6 +14,7 @@ create table if not exists public.impegni (
   ricorrenza       jsonb,
   serie_id         uuid,
   prossimo_creato  uuid,
+  scadenza         boolean not null default false,
   fatto            boolean not null default false,
   fatto_il         timestamptz,
   eliminato        boolean not null default false,
@@ -43,6 +44,7 @@ create table if not exists public.impostazioni (
 -- Per chi ha creato le tabelle con una versione precedente dello schema.
 alter table public.impegni  add column if not exists sincronizzato_il timestamptz not null default now();
 alter table public.chiusure add column if not exists sincronizzato_il timestamptz not null default now();
+alter table public.impegni  add column if not exists scadenza boolean not null default false;
 
 -- sincronizzato_il è scritto dal server a ogni insert/update: è il
 -- "segnalibro" con cui l'app scarica solo le novità, indipendente dagli

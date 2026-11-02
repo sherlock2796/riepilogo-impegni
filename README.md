@@ -16,6 +16,12 @@ link magico per email.
 - **Aggiunta in linguaggio naturale**: scrivi «dentista martedì alle 15, alta»
   e l'app compila data, ora, priorità, tipo e ricorrenza. Puoi sempre correggere
   a mano prima di salvare.
+- **Impegni a scadenza** ("entro venerdì"): visibili da subito nel blocco
+  "In scadenza" con il conto alla rovescia, entrano nella lista del giorno
+  solo all'ultimo giorno utile e la serie si rompe solo se a quel punto non
+  sono fatti.
+- **Agenda**: nella scheda Settimana, un interruttore passa a una lista
+  unica di tutto quello che viene, raggruppata per giorno, senza limiti.
 - **Modifica, cancellazione, rimando** a domani, fra 2 giorni, settimana prossima
   o a una data libera.
 - **Ricorrenze**: ogni giorno, ogni N giorni, ogni settimana, in certi giorni della
@@ -53,6 +59,7 @@ app/
 supabase/schema.sql   tabelle, trigger e regole di sicurezza da creare su Supabase
 supabase/aggiornamento-1.sql   solo per chi aveva già creato le tabelle con la prima versione
 supabase/aggiornamento-2.sql   permessi per gli utenti collegati, se compare "permission denied"
+supabase/aggiornamento-3.sql   colonna per gli impegni a scadenza
 tests/                test unitari (node --test tests/*.test.mjs) e di regressione nel browser (node tests/e2e.mjs)
 .github/workflows/pages.yml   pubblicazione automatica su GitHub Pages
 ```
@@ -82,6 +89,8 @@ Serve una volta sola, circa dieci minuti.
    Senza, l'app mostra "Il database Supabase va aggiornato".
    Se vedi "permission denied for table impegni", esegui
    `supabase/aggiornamento-2.sql`: assegna i permessi agli utenti collegati.
+   Se vedi "Il database va aggiornato per le scadenze", esegui
+   `supabase/aggiornamento-3.sql`: aggiunge la colonna `scadenza`.
 3. **Authentication → Providers → Email**: lascia attivo Email, disattiva
    «Confirm email» se vuoi evitare la doppia mail. Il link magico è già abilitato.
 4. **Authentication → URL Configuration**:
