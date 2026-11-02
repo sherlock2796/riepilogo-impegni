@@ -8,7 +8,7 @@ import { scegliFrase, saluto, BASE, MOMENTI } from "./frasi.js";
 import { descrivi as descriviRicorrenza, allineaData } from "./ricorrenze.js";
 import * as D from "./date.js";
 
-const VERSIONE_APP = "1.2.2";
+const VERSIONE_APP = "1.2.3";
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -216,6 +216,43 @@ async function disattivaNotifiche() {
   } finally {
     calcolaStatoPush();
   }
+}
+
+async function verificaNotifiche() {
+  ui.push = { ...(ui.push || {}), inCorso: true, errore: "", diagnosi: null }; render();
+  try {
+    ui.push.diagnosi = await conTimeout(sync.diagnosiNotifiche(), 20000, "La funzione non ha risposto in tempo.");
+  } catch (err) {
+    ui.push.errore = err.message || String(err);
+  } finally {
+    ui.push.inCorso = false; render();
+  }
+}
+
+function rendiDiagnosi(d) {
+  const righe = [];
+  const ok = (t) => `<li>✅ ${t}</li>`, ko = (t) => `<li>❌ ${t}</li>`, warn = (t) => `<li>⚠️ ${t}</li>`;
+  righe.push(d.vapid ? ok("Chiavi VAPID presenti") : ko("Chiavi VAPID mancanti nei secrets della funzione"));
+  righe.push(typeof d.dispositivi === "number" ? (d.dispositivi ? ok(`Dispositivi registrati: ${d.dispositivi}`) : warn("Nessun dispositivo registrato: premi Attiva")) : ko(`Dispositivi: ${h(String(d.dispositivi))}`));
+  if (!d.chiaveServizio) {
+    righe.push(ko("Chiave di servizio mancante: il controllo automatico non può leggere i dati. Aggiungi il secret CHIAVE_SERVIZIO (chiave service_role, Project Settings → API)."));
+  } else {
+    const problemi = Object.entries(d.tabelle || {}).filter(([, v]) => v !== "ok");
+    if (!problemi.length) righe.push(ok("Il server legge tutte le tabelle"));
+    else for (const [t, v] of problemi) righe.push(ko(`Tabella ${h(t)}: ${h(String(v))}${/permission denied/i.test(String(v)) ? " → esegui supabase/aggiornamento-5.sql" : /does not exist|schema cache/i.test(String(v)) ? " → esegui supabase/aggiornamento-5.sql (o 4)" : ""}`));
+  }
+  if (d.ultimoGiro) {
+    const min = Math.round((Date.now() - new Date(d.ultimoGiro).getTime()) / 60000);
+    const e = d.esitoUltimoGiro || {};
+    righe.push(min <= 3
+      ? ok(`Controllo automatico attivo: ultimo giro ${min <= 1 ? "meno di un minuto" : min + " minuti"} fa${e.errore ? ", ma con errore: " + h(e.errore) : ""}`)
+      : warn(`Ultimo controllo automatico ${min} minuti fa: pg_cron sembra fermo (aggiornamento-4.sql)${e.errore ? "; ultimo errore: " + h(e.errore) : ""}`));
+  } else if (d.statoErrore && /does not exist|schema cache/i.test(d.statoErrore)) {
+    righe.push(warn("Tabella di stato assente: esegui supabase/aggiornamento-5.sql, poi riverifica tra un paio di minuti"));
+  } else {
+    righe.push(warn("Nessun controllo automatico registrato finora: se hai appena eseguito l'SQL, riverifica tra un paio di minuti; altrimenti controlla pg_cron (aggiornamento-4.sql)"));
+  }
+  return `<ul style="margin:8px 0 0;padding-left:18px;font-size:14.5px;line-height:1.5">${righe.join("")}</ul>`;
 }
 
 async function provaNotifica() {
@@ -634,6 +671,10 @@ function vistaImpostazioni() {
       <button class="bottone-mini" data-azione="push-attiva" ${push.inCorso ? "disabled" : ""}>${push.inCorso ? "Attivo…" : "Attiva"}</button></div>`;
   }
   if (push?.errore) html += `<div class="voce" style="display:block"><div class="avviso ko">${h(push.errore)}</div></div>`;
+  if (s.utente && push && push.supporto === "ok") {
+    html += `<div class="voce" style="display:block"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><div><div class="t">Verifica configurazione</div><div class="d">Controlla chiavi, permessi e che il controllo automatico stia girando.</div></div>
+      <button class="bottone-mini" data-azione="push-verifica" ${push.inCorso ? "disabled" : ""}>Verifica</button></div>${push.diagnosi ? rendiDiagnosi(push.diagnosi) : ""}</div>`;
+  }
   html += `
     <div class="voce"><div><div class="t">Riepilogo del mattino</div><div class="d">Gli impegni di oggi e la frase del giorno.</div></div>
       <div style="display:flex;gap:10px;align-items:center;flex:none"><input type="time" data-campo-notifica="oraMattino" value="${h(notif.oraMattino)}" ${notif.mattino ? "" : "disabled"}>${interruttore("mattino", notif.mattino).replace('data-azione="toggle"', 'data-azione="toggle-notifica"')}</div></div>
@@ -737,6 +778,7 @@ function gestisciClick(e) {
     case "push-attiva": return attivaNotifiche();
     case "push-disattiva": return disattivaNotifiche();
     case "push-prova": return provaNotifica();
+    case "push-verifica": return verificaNotifiche();
     case "toggle-notifica": {
       const k = el.dataset.chiave;
       const notif = { ...NOTIFICHE_DEFAULT, ...(store.impostazioni().notifiche || {}) };

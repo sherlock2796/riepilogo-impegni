@@ -66,6 +66,7 @@ supabase/aggiornamento-1.sql   solo per chi aveva già creato le tabelle con la 
 supabase/aggiornamento-2.sql   permessi per gli utenti collegati, se compare "permission denied"
 supabase/aggiornamento-3.sql   colonna per gli impegni a scadenza
 supabase/aggiornamento-4.sql   tabelle e controllo programmato per le notifiche
+supabase/aggiornamento-5.sql   permessi al server e tabella di stato del controllo
 supabase/functions/notifiche/  Edge Function che manda le notifiche push (index.ts generato da sorgente.ts)
 scripts/costruisci-funzione.sh  rigenera index.ts
 tests/                test unitari (node --test tests/*.test.mjs) e di regressione nel browser (node tests/e2e.mjs)
@@ -184,8 +185,13 @@ da pg_cron. Serve la sincronizzazione già configurata. Passaggi, una volta sola
    `pg_cron` e `pg_net` e programma la chiamata ogni minuto. Se le due
    righe `create extension` danno errore, attiva le estensioni da
    Database → Extensions e riesegui il file.
-5. **Nell'app** (su iPhone dall'app installata in Home): Impostazioni →
-   Notifiche → Attiva → Consenti. Poi "Invia una prova".
+5. **SQL**: esegui anche `supabase/aggiornamento-5.sql`: dà al server i
+   permessi sulle tabelle (il giro automatico gira con il ruolo
+   `service_role`) e crea la tabella di stato del controllo.
+6. **Nell'app** (su iPhone dall'app installata in Home): Impostazioni →
+   Notifiche → Attiva → Consenti. Poi "Invia una prova" e **Verifica
+   configurazione**, che controlla chiavi, permessi e che il controllo
+   automatico stia girando.
 
 Le preferenze (orario del riepilogo, anticipo dei promemoria, ora dell'avviso
 di scadenza) sono in Impostazioni → Notifiche e valgono per tutti i

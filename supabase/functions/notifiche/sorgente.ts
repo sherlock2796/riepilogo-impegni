@@ -3,7 +3,8 @@
 // Viene chiamata:
 //   - ogni minuto da pg_cron (vedi supabase/aggiornamento-4.sql), senza corpo;
 //   - dall'app, con { "chiavePubblica": true } per avere la chiave pubblica VAPID;
-//   - dall'app, con { "prova": true } e il token dell'utente, per la notifica di prova.
+//   - dall'app, con { "prova": true } e il token dell'utente, per la notifica di prova;
+//   - dall'app, con { "diagnosi": true } e il token dell'utente, per verificare la configurazione.
 //
 // Secrets da impostare nel pannello (Edge Functions → Secrets):
 //   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT (es. "mailto:tu@esempio.it")
@@ -135,11 +136,41 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true, inviate, dispositivi: abbonamenti.length, errori });
   }
 
+  // ---------------- verifica della configurazione, richiesta dall'app ----------------
+  if (corpo?.diagnosi) {
+    const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+    const chiaveClient = CHIAVE_ANON || CHIAVE_SERVIZIO;
+    if (!chiaveClient) return json({ errore: "Mancano SUPABASE_ANON_KEY e CHIAVE_ANON nella funzione." }, 500);
+    const comeUtente = createClient(URL_SUPABASE, chiaveClient, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data, error } = await comeUtente.auth.getUser(token);
+    if (error || !data?.user) return json({ errore: `Non autorizzato: ${error?.message ?? "token mancante"}` }, 401);
+    const esito: any = { chiaveServizio: !!CHIAVE_SERVIZIO, vapid: !!(VAPID_PUB && VAPID_PRIV), tabelle: {}, dispositivi: 0, ultimoGiro: null, esitoUltimoGiro: null };
+    const d = await comeUtente.from("push_abbonamenti").select("endpoint").eq("user_id", data.user.id);
+    esito.dispositivi = d.error ? `errore: ${d.error.message}` : (d.data?.length ?? 0);
+    if (CHIAVE_SERVIZIO) {
+      const admin = createClient(URL_SUPABASE, CHIAVE_SERVIZIO, { auth: { persistSession: false } });
+      for (const t of ["impegni", "impostazioni", "push_abbonamenti", "notifiche_inviate", "notifiche_stato"]) {
+        const r = await admin.from(t).select("*", { count: "exact", head: true });
+        esito.tabelle[t] = r.error ? r.error.message : "ok";
+      }
+    }
+    const s = await comeUtente.from("notifiche_stato").select("*").eq("id", 1).maybeSingle();
+    if (!s.error && s.data) { esito.ultimoGiro = s.data.ultimo_giro; esito.esitoUltimoGiro = s.data.esito; }
+    else if (s.error) esito.statoErrore = s.error.message;
+    return json(esito);
+  }
+
   // ---------------- giro programmato (ogni minuto) ----------------
   if (!CHIAVE_SERVIZIO) return json({ errore: "Manca la chiave di servizio: aggiungi il secret CHIAVE_SERVIZIO con la chiave service_role del progetto (Project Settings → API)." }, 500);
   const admin = createClient(URL_SUPABASE, CHIAVE_SERVIZIO, { auth: { persistSession: false } });
+  const segnaStato = async (esito: unknown) => {
+    try { await admin.from("notifiche_stato").upsert({ id: 1, ultimo_giro: new Date().toISOString(), esito }); } catch { /* tabella assente */ }
+  };
   const { data: abbonamenti, error: e1 } = await admin.from("push_abbonamenti").select("*");
-  if (e1) return json({ errore: spiegaErroreDb(e1.message) }, 500);
+  if (e1) { const errore = spiegaErroreDb(e1.message); await segnaStato({ errore }); return json({ errore }, 500); }
 
   const perUtente = new Map<string, Abbonamento[]>();
   for (const a of (abbonamenti ?? []) as Abbonamento[]) {
@@ -178,5 +209,6 @@ Deno.serve(async (req: Request) => {
 
   // Pulizia del registro: bastano pochi giorni.
   await admin.from("notifiche_inviate").delete().lt("inviata_il", new Date(adesso.getTime() - 7 * 86400000).toISOString());
+  await segnaStato(esito);
   return json({ ok: true, ...esito });
 });

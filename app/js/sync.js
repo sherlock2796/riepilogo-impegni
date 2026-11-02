@@ -200,6 +200,15 @@ export async function chiavePubblicaNotifiche() {
   return data.chiave;
 }
 
+/** Chiede alla Edge Function di verificare la configurazione delle notifiche. */
+export async function diagnosiNotifiche() {
+  if (!client || !utente) throw new Error("Collega prima l'account.");
+  const { data, error } = await client.functions.invoke("notifiche", { body: { diagnosi: true } });
+  if (error) throw await erroreFunzione(error);
+  if (data?.errore) throw new Error(traduci(data.errore));
+  return data;
+}
+
 /** Chiede alla Edge Function di mandare una notifica di prova a questo account. */
 export async function inviaNotificaProva() {
   if (!client || !utente) throw new Error("Collega prima l'account.");

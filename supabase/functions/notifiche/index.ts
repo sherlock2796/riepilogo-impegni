@@ -341,10 +341,47 @@ Deno.serve(async (req) => {
     if (!inviate) return json({ errore: `Invio fallito: ${errori.join(" | ")}` }, 502);
     return json({ ok: true, inviate, dispositivi: abbonamenti2.length, errori });
   }
+  if (corpo?.diagnosi) {
+    const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+    const chiaveClient = CHIAVE_ANON || CHIAVE_SERVIZIO;
+    if (!chiaveClient) return json({ errore: "Mancano SUPABASE_ANON_KEY e CHIAVE_ANON nella funzione." }, 500);
+    const comeUtente = createClient(URL_SUPABASE, chiaveClient, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+    const { data, error } = await comeUtente.auth.getUser(token);
+    if (error || !data?.user) return json({ errore: `Non autorizzato: ${error?.message ?? "token mancante"}` }, 401);
+    const esito2 = { chiaveServizio: !!CHIAVE_SERVIZIO, vapid: !!(VAPID_PUB && VAPID_PRIV), tabelle: {}, dispositivi: 0, ultimoGiro: null, esitoUltimoGiro: null };
+    const d = await comeUtente.from("push_abbonamenti").select("endpoint").eq("user_id", data.user.id);
+    esito2.dispositivi = d.error ? `errore: ${d.error.message}` : d.data?.length ?? 0;
+    if (CHIAVE_SERVIZIO) {
+      const admin2 = createClient(URL_SUPABASE, CHIAVE_SERVIZIO, { auth: { persistSession: false } });
+      for (const t of ["impegni", "impostazioni", "push_abbonamenti", "notifiche_inviate", "notifiche_stato"]) {
+        const r = await admin2.from(t).select("*", { count: "exact", head: true });
+        esito2.tabelle[t] = r.error ? r.error.message : "ok";
+      }
+    }
+    const s = await comeUtente.from("notifiche_stato").select("*").eq("id", 1).maybeSingle();
+    if (!s.error && s.data) {
+      esito2.ultimoGiro = s.data.ultimo_giro;
+      esito2.esitoUltimoGiro = s.data.esito;
+    } else if (s.error) esito2.statoErrore = s.error.message;
+    return json(esito2);
+  }
   if (!CHIAVE_SERVIZIO) return json({ errore: "Manca la chiave di servizio: aggiungi il secret CHIAVE_SERVIZIO con la chiave service_role del progetto (Project Settings \u2192 API)." }, 500);
   const admin = createClient(URL_SUPABASE, CHIAVE_SERVIZIO, { auth: { persistSession: false } });
+  const segnaStato = async (esito2) => {
+    try {
+      await admin.from("notifiche_stato").upsert({ id: 1, ultimo_giro: (/* @__PURE__ */ new Date()).toISOString(), esito: esito2 });
+    } catch {
+    }
+  };
   const { data: abbonamenti, error: e1 } = await admin.from("push_abbonamenti").select("*");
-  if (e1) return json({ errore: spiegaErroreDb(e1.message) }, 500);
+  if (e1) {
+    const errore = spiegaErroreDb(e1.message);
+    await segnaStato({ errore });
+    return json({ errore }, 500);
+  }
   const perUtente = /* @__PURE__ */ new Map();
   for (const a of abbonamenti ?? []) {
     if (!perUtente.has(a.user_id)) perUtente.set(a.user_id, []);
@@ -374,5 +411,6 @@ Deno.serve(async (req) => {
     }
   }
   await admin.from("notifiche_inviate").delete().lt("inviata_il", new Date(adesso.getTime() - 7 * 864e5).toISOString());
+  await segnaStato(esito);
   return json({ ok: true, ...esito });
 });
