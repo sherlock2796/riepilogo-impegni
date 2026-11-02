@@ -176,7 +176,11 @@ da pg_cron. Serve la sincronizzazione già configurata. Passaggi, una volta sola
    `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT` (`mailto:` seguito dalla tua email)
    con i valori del passaggio 1. La chiave pubblica l'app la chiede alla
    funzione: in `config.js` non serve nulla.
-4. **SQL**: esegui `supabase/aggiornamento-4.sql`. Crea le tabelle, attiva
+4. **SQL**: esegui `supabase/aggiornamento-4.sql`.
+   Se la prova risponde "Chiave del database non valida" o "Manca la chiave
+   di servizio", aggiungi ai secrets anche `CHIAVE_SERVIZIO` (la chiave
+   `service_role` da Project Settings → API) ed eventualmente `CHIAVE_ANON`
+   (la chiave `anon`): servono quando Supabase non le fornisce da sé. Crea le tabelle, attiva
    `pg_cron` e `pg_net` e programma la chiamata ogni minuto. Se le due
    righe `create extension` danno errore, attiva le estensioni da
    Database → Extensions e riesegui il file.

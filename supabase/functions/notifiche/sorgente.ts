@@ -20,7 +20,11 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { pianifica, NOTIFICHE_DEFAULT, oraLocale, spostaGiorno } from "../../../app/js/notifiche-logica.js";
 
 const URL_SUPABASE = Deno.env.get("SUPABASE_URL") ?? "";
-const CHIAVE_SERVIZIO = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+// Supabase fornisce da sé SUPABASE_SERVICE_ROLE_KEY e SUPABASE_ANON_KEY. Se nel
+// progetto mancassero, si possono aggiungere a mano come secrets con i nomi
+// CHIAVE_SERVIZIO (chiave service_role) e CHIAVE_ANON (chiave anon).
+const CHIAVE_SERVIZIO = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("CHIAVE_SERVIZIO") || "";
+const CHIAVE_ANON = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("CHIAVE_ANON") || "";
 const VAPID_PUB = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
 const VAPID_PRIV = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
 const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:impegni@example.com";
@@ -56,6 +60,24 @@ async function invia(admin: any, abb: Abbonamento, n: Notifica): Promise<boolean
   }
 }
 
+/** Come invia(), ma ritorna true oppure la descrizione dell'errore. */
+async function inviaDettagliato(client: any, abb: Abbonamento, n: Notifica): Promise<true | string> {
+  try {
+    await webpush.sendNotification(
+      { endpoint: abb.endpoint, keys: { p256dh: abb.p256dh, auth: abb.auth } },
+      JSON.stringify({ titolo: n.titolo, corpo: n.corpo, url: n.url ?? "./#/oggi", tag: n.tag ?? "impegni" }),
+      { TTL: 3600, urgency: "high" },
+    );
+    return true;
+  } catch (e: any) {
+    if (e?.statusCode === 404 || e?.statusCode === 410) {
+      await client.from("push_abbonamenti").delete().eq("endpoint", abb.endpoint);
+      return "dispositivo non più registrato presso Apple/Google: disattiva e riattiva le notifiche";
+    }
+    return `stato ${e?.statusCode ?? "?"}: ${String(e?.body ?? e?.message ?? e).slice(0, 200)}`;
+  }
+}
+
 async function impegniDi(admin: any, userId: string, da: string, a: string) {
   const colonne = "id,titolo,data,ora,tipo,note,scadenza,priorita,fatto,eliminato";
   let r = await admin.from("impegni").select(colonne).eq("user_id", userId).eq("eliminato", false).gte("data", da).lte("data", a);
@@ -82,26 +104,42 @@ Deno.serve(async (req: Request) => {
 
   if (!VAPID_PUB || !VAPID_PRIV) return json({ errore: "Mancano VAPID_PUBLIC_KEY e VAPID_PRIVATE_KEY nei secrets della funzione" }, 500);
   webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUB, VAPID_PRIV);
-  const admin = createClient(URL_SUPABASE, CHIAVE_SERVIZIO, { auth: { persistSession: false } });
+
+  const spiegaErroreDb = (msg: string) =>
+    /does not exist|schema cache/i.test(msg) ? "Tabella push_abbonamenti mancante: esegui supabase/aggiornamento-4.sql"
+      : /api key|apikey|jwt|invalid|unauthorized/i.test(msg) ? `Chiave del database non valida nella funzione (${msg}). Aggiungi il secret CHIAVE_SERVIZIO con la chiave service_role (Project Settings → API).`
+      : `Lettura del database fallita: ${msg}`;
 
   // ---------------- notifica di prova, richiesta dall'app ----------------
   if (corpo?.prova) {
+    // Lavoro con il token dell'utente: bastano i suoi permessi, niente chiave di servizio.
     const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
-    const { data, error } = await admin.auth.getUser(token);
-    if (error || !data?.user) return json({ errore: "Non autorizzato" }, 401);
-    const { data: abbonamenti, error: eAbb } = await admin.from("push_abbonamenti").select("*").eq("user_id", data.user.id);
-    if (eAbb) return json({ errore: /does not exist|schema cache/i.test(eAbb.message) ? "Tabella push_abbonamenti mancante: esegui supabase/aggiornamento-4.sql" : eAbb.message }, 500);
+    const chiaveClient = CHIAVE_ANON || CHIAVE_SERVIZIO;
+    if (!chiaveClient) return json({ errore: "Mancano SUPABASE_ANON_KEY e CHIAVE_ANON: aggiungi il secret CHIAVE_ANON con la chiave anon del progetto." }, 500);
+    const comeUtente = createClient(URL_SUPABASE, chiaveClient, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data, error } = await comeUtente.auth.getUser(token);
+    if (error || !data?.user) return json({ errore: `Non autorizzato: ${error?.message ?? "token mancante"}` }, 401);
+    const { data: abbonamenti, error: eAbb } = await comeUtente.from("push_abbonamenti").select("*").eq("user_id", data.user.id);
+    if (eAbb) return json({ errore: spiegaErroreDb(eAbb.message) }, 500);
     if (!abbonamenti?.length) return json({ errore: "Nessun dispositivo registrato per questo account" }, 404);
     let inviate = 0;
+    const errori: string[] = [];
     for (const a of abbonamenti as Abbonamento[]) {
-      if (await invia(admin, a, { titolo: "Funziona! 🎉", corpo: "Le notifiche sono attive. Ci sentiamo domattina.", url: "./#/impostazioni", tag: "prova" })) inviate++;
+      const esito = await inviaDettagliato(comeUtente, a, { titolo: "Funziona! 🎉", corpo: "Le notifiche sono attive. Ci sentiamo domattina.", url: "./#/impostazioni", tag: "prova" });
+      if (esito === true) inviate++; else errori.push(esito);
     }
-    return json({ ok: true, inviate, dispositivi: abbonamenti.length });
+    if (!inviate) return json({ errore: `Invio fallito: ${errori.join(" | ")}` }, 502);
+    return json({ ok: true, inviate, dispositivi: abbonamenti.length, errori });
   }
 
   // ---------------- giro programmato (ogni minuto) ----------------
+  if (!CHIAVE_SERVIZIO) return json({ errore: "Manca la chiave di servizio: aggiungi il secret CHIAVE_SERVIZIO con la chiave service_role del progetto (Project Settings → API)." }, 500);
+  const admin = createClient(URL_SUPABASE, CHIAVE_SERVIZIO, { auth: { persistSession: false } });
   const { data: abbonamenti, error: e1 } = await admin.from("push_abbonamenti").select("*");
-  if (e1) return json({ errore: /does not exist|schema cache/i.test(e1.message) ? "Tabella push_abbonamenti mancante: esegui supabase/aggiornamento-4.sql" : e1.message }, 500);
+  if (e1) return json({ errore: spiegaErroreDb(e1.message) }, 500);
 
   const perUtente = new Map<string, Abbonamento[]>();
   for (const a of (abbonamenti ?? []) as Abbonamento[]) {
