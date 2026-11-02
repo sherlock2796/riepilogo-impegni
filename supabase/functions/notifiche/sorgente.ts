@@ -89,7 +89,8 @@ Deno.serve(async (req: Request) => {
     const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
     const { data, error } = await admin.auth.getUser(token);
     if (error || !data?.user) return json({ errore: "Non autorizzato" }, 401);
-    const { data: abbonamenti } = await admin.from("push_abbonamenti").select("*").eq("user_id", data.user.id);
+    const { data: abbonamenti, error: eAbb } = await admin.from("push_abbonamenti").select("*").eq("user_id", data.user.id);
+    if (eAbb) return json({ errore: /does not exist|schema cache/i.test(eAbb.message) ? "Tabella push_abbonamenti mancante: esegui supabase/aggiornamento-4.sql" : eAbb.message }, 500);
     if (!abbonamenti?.length) return json({ errore: "Nessun dispositivo registrato per questo account" }, 404);
     let inviate = 0;
     for (const a of abbonamenti as Abbonamento[]) {
@@ -100,7 +101,7 @@ Deno.serve(async (req: Request) => {
 
   // ---------------- giro programmato (ogni minuto) ----------------
   const { data: abbonamenti, error: e1 } = await admin.from("push_abbonamenti").select("*");
-  if (e1) return json({ errore: e1.message }, 500);
+  if (e1) return json({ errore: /does not exist|schema cache/i.test(e1.message) ? "Tabella push_abbonamenti mancante: esegui supabase/aggiornamento-4.sql" : e1.message }, 500);
 
   const perUtente = new Map<string, Abbonamento[]>();
   for (const a of (abbonamenti ?? []) as Abbonamento[]) {

@@ -305,7 +305,8 @@ Deno.serve(async (req) => {
     const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
     const { data, error } = await admin.auth.getUser(token);
     if (error || !data?.user) return json({ errore: "Non autorizzato" }, 401);
-    const { data: abbonamenti2 } = await admin.from("push_abbonamenti").select("*").eq("user_id", data.user.id);
+    const { data: abbonamenti2, error: eAbb } = await admin.from("push_abbonamenti").select("*").eq("user_id", data.user.id);
+    if (eAbb) return json({ errore: /does not exist|schema cache/i.test(eAbb.message) ? "Tabella push_abbonamenti mancante: esegui supabase/aggiornamento-4.sql" : eAbb.message }, 500);
     if (!abbonamenti2?.length) return json({ errore: "Nessun dispositivo registrato per questo account" }, 404);
     let inviate = 0;
     for (const a of abbonamenti2) {
@@ -314,7 +315,7 @@ Deno.serve(async (req) => {
     return json({ ok: true, inviate, dispositivi: abbonamenti2.length });
   }
   const { data: abbonamenti, error: e1 } = await admin.from("push_abbonamenti").select("*");
-  if (e1) return json({ errore: e1.message }, 500);
+  if (e1) return json({ errore: /does not exist|schema cache/i.test(e1.message) ? "Tabella push_abbonamenti mancante: esegui supabase/aggiornamento-4.sql" : e1.message }, 500);
   const perUtente = /* @__PURE__ */ new Map();
   for (const a of abbonamenti ?? []) {
     if (!perUtente.has(a.user_id)) perUtente.set(a.user_id, []);

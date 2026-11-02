@@ -8,7 +8,7 @@ import { scegliFrase, saluto, BASE, MOMENTI } from "./frasi.js";
 import { descrivi as descriviRicorrenza, allineaData } from "./ricorrenze.js";
 import * as D from "./date.js";
 
-const VERSIONE_APP = "1.2.1";
+const VERSIONE_APP = "1.2.2";
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -152,9 +152,24 @@ async function statoPush() {
   return s;
 }
 
+/** Rimanda al server l'abbonamento di questo dispositivo: ripara righe mancanti. */
+async function riconfermaAbbonamento() {
+  if (!sync.utenteCollegato()) return;
+  const reg = await registrazioneSW();
+  const sub = reg ? await reg.pushManager.getSubscription() : null;
+  if (!sub) return;
+  await sync.salvaAbbonamento(sub, descrizioneDispositivo());
+}
+
+let riconfermaFatta = false;
 function calcolaStatoPush() {
-  statoPush().then((st) => {
+  statoPush().then(async (st) => {
     ui.push = { ...st, errore: ui.push?.errore || "", inCorso: false };
+    if (st.attive && !riconfermaFatta && sync.utenteCollegato()) {
+      riconfermaFatta = true;
+      try { await riconfermaAbbonamento(); }
+      catch (err) { ui.push.errore = err.message || String(err); }
+    }
     if (ui.vista === "impostazioni") render();
   });
 }
@@ -206,6 +221,7 @@ async function disattivaNotifiche() {
 async function provaNotifica() {
   ui.push = { ...(ui.push || {}), inCorso: true, errore: "" }; render();
   try {
+    await conTimeout(riconfermaAbbonamento(), 15000, "Non riesco a registrare il dispositivo sul server: controlla la connessione.");
     const r = await conTimeout(sync.inviaNotificaProva(), 20000, "La funzione non ha risposto in tempo.");
     avvisa(`Notifica di prova inviata a ${r?.dispositivi || 1} ${r?.dispositivi === 1 ? "dispositivo" : "dispositivi"}. Dovrebbe arrivare tra pochi secondi.`);
   } catch (err) {
