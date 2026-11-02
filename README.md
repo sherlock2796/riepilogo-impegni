@@ -66,7 +66,8 @@ supabase/aggiornamento-1.sql   solo per chi aveva già creato le tabelle con la 
 supabase/aggiornamento-2.sql   permessi per gli utenti collegati, se compare "permission denied"
 supabase/aggiornamento-3.sql   colonna per gli impegni a scadenza
 supabase/aggiornamento-4.sql   tabelle e controllo programmato per le notifiche
-supabase/functions/notifiche/  Edge Function che manda le notifiche push
+supabase/functions/notifiche/  Edge Function che manda le notifiche push (index.ts generato da sorgente.ts)
+scripts/costruisci-funzione.sh  rigenera index.ts
 tests/                test unitari (node --test tests/*.test.mjs) e di regressione nel browser (node tests/e2e.mjs)
 .github/workflows/pages.yml   pubblicazione automatica su GitHub Pages
 ```
@@ -190,8 +191,11 @@ Per cambiare chiavi: genera una coppia nuova da `vapid.html`, aggiorna i
 secrets e riattiva le notifiche sui dispositivi.
 
 La logica "cosa mandare e quando" è in `app/js/notifiche-logica.js`, usata
-sia dai test sia dalla funzione (che la importa dall'indirizzo pubblicato
-dell'app: dopo una modifica va ripubblicata la funzione).
+dai test e dalla funzione. Il file `index.ts` da incollare nel pannello è
+generato da `sorgente.ts` con `scripts/costruisci-funzione.sh` e include già
+logica e frasi (il pannello di Supabase non accetta importazioni da
+indirizzi web qualsiasi). Dopo una modifica: rilancia lo script, poi
+ripubblica la funzione.
 
 ## Sviluppo in locale
 
