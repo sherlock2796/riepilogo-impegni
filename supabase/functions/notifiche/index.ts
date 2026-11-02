@@ -26,8 +26,15 @@ const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:impegni@example.c
 type Abbonamento = { endpoint: string; p256dh: string; auth: string; user_id: string };
 type Notifica = { chiave?: string; titolo: string; corpo: string; url?: string; tag?: string };
 
+// Intestazioni CORS: l'app chiama la funzione dal browser, che prima manda una
+// richiesta OPTIONS di controllo e poi pretende queste intestazioni nella risposta.
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
 const json = (dati: unknown, status = 200) =>
-  new Response(JSON.stringify(dati), { status, headers: { "Content-Type": "application/json" } });
+  new Response(JSON.stringify(dati), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
 async function invia(admin: any, abb: Abbonamento, n: Notifica): Promise<boolean> {
   try {
@@ -59,16 +66,21 @@ async function impegniDi(admin: any, userId: string, da: string, a: string) {
 }
 
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ errore: "Solo POST" }, 405);
-  if (!VAPID_PUB || !VAPID_PRIV) return json({ errore: "Mancano VAPID_PUBLIC_KEY e VAPID_PRIVATE_KEY nei secrets" }, 500);
-  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUB, VAPID_PRIV);
 
-  const admin = createClient(URL_SUPABASE, CHIAVE_SERVIZIO, { auth: { persistSession: false } });
   let corpo: any = {};
   try { corpo = await req.json(); } catch { corpo = {}; }
 
   // ---------------- l'app chiede la chiave pubblica per registrarsi ----------------
-  if (corpo?.chiavePubblica) return json({ chiave: VAPID_PUB });
+  if (corpo?.chiavePubblica) {
+    if (!VAPID_PUB) return json({ errore: "Manca VAPID_PUBLIC_KEY nei secrets della funzione" }, 500);
+    return json({ chiave: VAPID_PUB });
+  }
+
+  if (!VAPID_PUB || !VAPID_PRIV) return json({ errore: "Mancano VAPID_PUBLIC_KEY e VAPID_PRIVATE_KEY nei secrets della funzione" }, 500);
+  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUB, VAPID_PRIV);
+  const admin = createClient(URL_SUPABASE, CHIAVE_SERVIZIO, { auth: { persistSession: false } });
 
   // ---------------- notifica di prova, richiesta dall'app ----------------
   if (corpo?.prova) {

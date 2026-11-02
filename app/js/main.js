@@ -8,7 +8,7 @@ import { scegliFrase, saluto, BASE, MOMENTI } from "./frasi.js";
 import { descrivi as descriviRicorrenza, allineaData } from "./ricorrenze.js";
 import * as D from "./date.js";
 
-const VERSIONE_APP = "1.2.0";
+const VERSIONE_APP = "1.2.1";
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -170,7 +170,7 @@ async function attivaNotifiche() {
   ui.push = { ...p, inCorso: true, errore: "" }; render();
   try {
     if (!sync.utenteCollegato()) throw new Error("Collega prima l'account.");
-    const chiave = await conTimeout(sync.chiavePubblicaNotifiche(), 15000, "La funzione 'notifiche' non risponde: va pubblicata su Supabase (vedi README).");
+    const chiave = await conTimeout(sync.chiavePubblicaNotifiche(), 20000, "La funzione 'notifiche' non ha risposto in tempo: controlla la connessione e riprova.");
     const permesso = await Notification.requestPermission();
     if (permesso !== "granted") throw new Error(permesso === "denied" ? "Notifiche bloccate: riattivale nelle impostazioni del telefono per questa app." : "Permesso non concesso.");
     const reg = await registrazioneSW(8000);

@@ -176,12 +176,26 @@ export async function rimuoviAbbonamento(endpoint) {
   if (error) throw new Error(traduci(error.message));
 }
 
+/** Trasforma l'errore di functions.invoke in un messaggio comprensibile. */
+async function erroreFunzione(error) {
+  const stato = error?.context?.status;
+  let corpo = null;
+  try { corpo = await error?.context?.clone?.().json(); } catch { corpo = null; }
+  if (corpo?.errore) return new Error(traduci(corpo.errore));
+  const msg = String(corpo?.message || corpo?.msg || error?.message || "");
+  if (stato === 404 || /function was not found|not_found/i.test(msg)) return new Error("La funzione 'notifiche' non è ancora pubblicata su Supabase: segui il README, sezione Notifiche.");
+  if (stato === 401 || /invalid jwt|unauthorized/i.test(msg)) return new Error("La funzione ha rifiutato l'accesso (stato 401): accedi di nuovo e riprova.");
+  if (/failed to send a request|failed to fetch|load failed|network/i.test(msg)) return new Error("Non riesco a raggiungere la funzione 'notifiche'. Se l'hai pubblicata con una versione vecchia del codice, ripubblicala con quella attuale (serve il supporto CORS); altrimenti controlla la connessione.");
+  return new Error(`La funzione 'notifiche' ha risposto con un errore${stato ? " (stato " + stato + ")" : ""}: ${traduci(msg || "dettagli nei log della funzione su Supabase")}`);
+}
+
 /** Chiave pubblica VAPID: da config.js se compilata, altrimenti dalla Edge Function. */
 export async function chiavePubblicaNotifiche() {
   if (globalThis.CONFIG?.vapidPublicKey) return CONFIG.vapidPublicKey;
   if (!client) throw new Error("Sincronizzazione non disponibile: controlla la connessione.");
   const { data, error } = await client.functions.invoke("notifiche", { body: { chiavePubblica: true } });
-  if (error) throw new Error(traduci(error.message || "Funzione non raggiungibile"));
+  if (error) throw await erroreFunzione(error);
+  if (data?.errore) throw new Error(traduci(data.errore));
   if (!data?.chiave) throw new Error("La funzione non ha la chiave VAPID_PUBLIC_KEY nei secrets (vedi README).");
   return data.chiave;
 }
@@ -190,11 +204,7 @@ export async function chiavePubblicaNotifiche() {
 export async function inviaNotificaProva() {
   if (!client || !utente) throw new Error("Collega prima l'account.");
   const { data, error } = await client.functions.invoke("notifiche", { body: { prova: true } });
-  if (error) {
-    let dettaglio = "";
-    try { dettaglio = (await error.context?.json())?.errore || ""; } catch { /* niente */ }
-    throw new Error(dettaglio ? traduci(dettaglio) : traduci(error.message || "Funzione non raggiungibile"));
-  }
+  if (error) throw await erroreFunzione(error);
   if (data?.errore) throw new Error(traduci(data.errore));
   return data;
 }
@@ -247,9 +257,8 @@ function traduci(msg = "") {
   if (m.includes("already used") || m.includes("refresh token")) return "Sessione non più valida: accedi di nuovo.";
   if (m.includes("invalid email")) return "Indirizzo email non valido.";
   if (m.includes("push_abbonamenti") || m.includes("notifiche_inviate")) return "Tabelle delle notifiche mancanti: esegui supabase/aggiornamento-4.sql (vedi README).";
-  if (m.includes("failed to send a request to the edge function") || m.includes("edge function")) return "La funzione 'notifiche' non risponde: va pubblicata su Supabase (vedi README, sezione Notifiche).";
   if (m.includes("nessun dispositivo")) return "Nessun dispositivo registrato: attiva prima le notifiche qui sopra.";
-  if (m.includes("vapid")) return "Mancano le chiavi VAPID nei secrets della funzione (vedi README).";
+  if (m.includes("vapid")) return "Mancano le chiavi VAPID nei secrets della funzione 'notifiche' (vedi README, passaggio 3).";
   if (m.includes("permission denied")) return "Permessi mancanti sul database: esegui supabase/aggiornamento-2.sql su Supabase (vedi README).";
   if (m.includes("scadenza")) return "Il database va aggiornato per le scadenze: esegui supabase/aggiornamento-3.sql (vedi README).";
   if (m.includes("sincronizzato_il")) return "Il database Supabase va aggiornato: esegui supabase/aggiornamento-1.sql (vedi README).";
