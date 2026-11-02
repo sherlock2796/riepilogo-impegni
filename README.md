@@ -22,6 +22,9 @@ link magico per email.
   sono fatti.
 - **Agenda**: nella scheda Settimana, un interruttore passa a una lista
   unica di tutto quello che viene, raggruppata per giorno, senza limiti.
+- **Notifiche sul telefono** (facoltative): riepilogo del mattino con la frase
+  del giorno, promemoria all'ora di un impegno con l'anticipo scelto, avviso
+  "ultimo giorno" per le scadenze. Su iPhone dall'app installata in Home.
 - **Modifica, cancellazione, rimando** a domani, fra 2 giorni, settimana prossima
   o a una data libera.
 - **Ricorrenze**: ogni giorno, ogni N giorni, ogni settimana, in certi giorni della
@@ -47,6 +50,7 @@ app/
   index.html          pagina unica
   style.css           stile (variabili per tema chiaro/scuro)
   config.js           URL e chiave Supabase (vuoti = solo locale)
+  vapid.html          strumento per generare le chiavi delle notifiche
   manifest.webmanifest, sw.js, icons/   installazione e offline
   js/
     main.js           interfaccia, viste, pannelli
@@ -54,12 +58,15 @@ app/
     sync.js           accesso e sincronizzazione Supabase
     parser.js         riconoscimento del linguaggio naturale
     frasi.js          banca delle frasi e scelta contestuale
+    notifiche-logica.js  cosa notificare e quando (condiviso con la Edge Function)
     ricorrenze.js     calcolo della ricorrenza successiva
     date.js           utilità date
 supabase/schema.sql   tabelle, trigger e regole di sicurezza da creare su Supabase
 supabase/aggiornamento-1.sql   solo per chi aveva già creato le tabelle con la prima versione
 supabase/aggiornamento-2.sql   permessi per gli utenti collegati, se compare "permission denied"
 supabase/aggiornamento-3.sql   colonna per gli impegni a scadenza
+supabase/aggiornamento-4.sql   tabelle e controllo programmato per le notifiche
+supabase/functions/notifiche/  Edge Function che manda le notifiche push
 tests/                test unitari (node --test tests/*.test.mjs) e di regressione nel browser (node tests/e2e.mjs)
 .github/workflows/pages.yml   pubblicazione automatica su GitHub Pages
 ```
@@ -151,6 +158,40 @@ condivide già l'accesso con Chrome.
 Limite del piano gratuito da sapere: Supabase invia poche email di accesso
 all'ora (3-4). La sessione però resta valida a lungo, quindi si accede
 raramente.
+
+## Notifiche push (facoltative, gratis)
+
+Le notifiche partono da una Edge Function di Supabase chiamata ogni minuto
+da pg_cron. Serve la sincronizzazione già configurata. Passaggi, una volta sola:
+
+1. **Genera le chiavi**: apri `vapid.html` dall'indirizzo dell'app (es.
+   `https://<utente>.github.io/riepilogo-impegni/vapid.html`) e premi
+   "Genera". Le chiavi nascono nel tuo browser e non vengono salvate.
+2. **Pubblica la funzione**: nel pannello Supabase → Edge Functions →
+   Deploy a new function → via editor. Nome `notifiche`, incolla il contenuto
+   di `supabase/functions/notifiche/index.ts`, premi Deploy. Lascia attiva
+   la verifica JWT (impostazione predefinita).
+3. **Secrets** (Edge Functions → Secrets): aggiungi `VAPID_PUBLIC_KEY`,
+   `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT` (`mailto:` seguito dalla tua email)
+   con i valori del passaggio 1. La chiave pubblica l'app la chiede alla
+   funzione: in `config.js` non serve nulla.
+4. **SQL**: esegui `supabase/aggiornamento-4.sql`. Crea le tabelle, attiva
+   `pg_cron` e `pg_net` e programma la chiamata ogni minuto. Se le due
+   righe `create extension` danno errore, attiva le estensioni da
+   Database → Extensions e riesegui il file.
+5. **Nell'app** (su iPhone dall'app installata in Home): Impostazioni →
+   Notifiche → Attiva → Consenti. Poi "Invia una prova".
+
+Le preferenze (orario del riepilogo, anticipo dei promemoria, ora dell'avviso
+di scadenza) sono in Impostazioni → Notifiche e valgono per tutti i
+dispositivi; l'attivazione va fatta su ciascun dispositivo.
+
+Per cambiare chiavi: genera una coppia nuova da `vapid.html`, aggiorna i
+secrets e riattiva le notifiche sui dispositivi.
+
+La logica "cosa mandare e quando" è in `app/js/notifiche-logica.js`, usata
+sia dai test sia dalla funzione (che la importa dall'indirizzo pubblicato
+dell'app: dopo una modifica va ripubblicata la funzione).
 
 ## Sviluppo in locale
 

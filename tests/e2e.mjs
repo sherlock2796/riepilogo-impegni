@@ -313,7 +313,16 @@ const idPerTitolo = (p, t) => p.$eval(`#vista .riga:has(.titolo:text-is("${t}"))
   await p.screenshot({ path: join(SCHERMATE, "08-impostazioni-scuro.png"), fullPage: true });
   await p.selectOption("select[data-campo-tema]", "auto");
   controlla("tema: automatico toglie l'attributo", await p.evaluate(() => !document.documentElement.dataset.theme));
-  controlla("impostazioni: riga diagnostica con versione", /Impegni \d+\.\d+\.\d+ · nel browser/.test(await p.textContent("main p:last-of-type")));
+  controlla("impostazioni: riga diagnostica con versione", /Impegni \d+\.\d+\.\d+ · nel browser/.test(await p.textContent("#diagnostica")));
+  // notifiche: sezione presente, preferenze modificabili anche senza account
+  controlla("notifiche: sezione presente", (await p.textContent("#vista")).includes("Riepilogo del mattino"));
+  await p.click("[data-azione=toggle-notifica][data-chiave=mattino]");
+  await dormi(150);
+  controlla("notifiche: interruttore salvato", await p.evaluate(() => JSON.parse(localStorage.getItem("impegni.v1")).impostazioni.notifiche.mattino === false));
+  await p.click("[data-azione=toggle-notifica][data-chiave=mattino]");
+  await p.selectOption("select[data-campo-notifica=anticipo]", "30");
+  await dormi(150);
+  controlla("notifiche: anticipo salvato con il fuso", await p.evaluate(() => { const n = JSON.parse(localStorage.getItem("impegni.v1")).impostazioni.notifiche; return n.anticipo === 30 && typeof n.fuso === "string" && n.fuso.length > 0; }));
 
   // backup: esporta e importa
   const [download] = await Promise.all([p.waitForEvent("download"), p.click("[data-azione=esporta]")]);

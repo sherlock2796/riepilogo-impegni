@@ -5,4 +5,7 @@
 window.CONFIG = {
   supabaseUrl: "https://siifawqmapfdybhvyeyi.supabase.co",
   supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNpaWZhd3FtYXBmZHliaHZ5ZXlpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEwMTM0ODQsImV4cCI6MjEwNjU4OTQ4NH0.DO905PmXOvOzBKVH1HJT-DPa-kDNHeDHSH78EkZdzKM",
+  // Notifiche push: lascia vuoto, la chiave pubblica la fornisce la Edge Function
+  // (secret VAPID_PUBLIC_KEY). Compilala solo se vuoi forzarne una.
+  vapidPublicKey: "",
 };

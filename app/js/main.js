@@ -2,12 +2,13 @@
 
 import * as store from "./store.js";
 import * as sync from "./sync.js";
+import { NOTIFICHE_DEFAULT } from "./notifiche-logica.js";
 import { analizza } from "./parser.js";
 import { scegliFrase, saluto, BASE, MOMENTI } from "./frasi.js";
 import { descrivi as descriviRicorrenza, allineaData } from "./ricorrenze.js";
 import * as D from "./date.js";
 
-const VERSIONE_APP = "1.1.1";
+const VERSIONE_APP = "1.2.0";
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -30,6 +31,7 @@ const ui = {
   focusMostraTutti: false,
   calendario: localStorage.getItem("calendario") === "agenda" ? "agenda" : "settimana",
   agendaFatti: false,
+  push: null, // stato delle notifiche su questo dispositivo (calcolato quando serve)
   installPrompt: null,
   login: { email: "", inviato: false, errore: "", inCorso: false, ok: "", mostraLink: false, offriRegistrazione: false },
   frasiMomentoAperto: null,
@@ -108,6 +110,109 @@ function render() {
   $("#vista").innerHTML = VISTE[ui.vista]();
   $$(".nav a").forEach((a) => a.classList.toggle("attiva", a.dataset.vista === ui.vista));
   aggiornaStatoSync(sync.statoSync);
+  aggiornaBadge();
+}
+
+/** Numero sull'icona dell'app installata: impegni di oggi ancora da fare. */
+function aggiornaBadge() {
+  if (!("setAppBadge" in navigator)) return;
+  try {
+    const n = store.perData(ui.oggi).filter((i) => !i.fatto).length;
+    (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
+  } catch { /* non supportato */ }
+}
+
+// ------------------------------ notifiche push ---------------------------------
+
+const b64aBytes = (s) => {
+  const b64 = (s + "=".repeat((4 - (s.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(b64);
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+};
+
+async function registrazioneSW(ms = 4000) {
+  if (!("serviceWorker" in navigator)) return null;
+  return Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(() => r(null), ms))]);
+}
+
+/** Stato delle notifiche su questo dispositivo. */
+async function statoPush() {
+  const s = { supporto: "ok", permesso: "default", attive: false, endpoint: null };
+  if (!("Notification" in window) || !("PushManager" in window) || !("serviceWorker" in navigator)) {
+    s.supporto = eIOS() && !eInstallata() ? "ios-browser" : "no";
+    return s;
+  }
+  s.permesso = Notification.permission;
+  try {
+    const reg = await registrazioneSW();
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    s.attive = !!sub;
+    s.endpoint = sub?.endpoint || null;
+  } catch { s.attive = false; }
+  return s;
+}
+
+function calcolaStatoPush() {
+  statoPush().then((st) => {
+    ui.push = { ...st, errore: ui.push?.errore || "", inCorso: false };
+    if (ui.vista === "impostazioni") render();
+  });
+}
+
+function descrizioneDispositivo() {
+  const ua = navigator.userAgent;
+  const so = /iPhone|iPad/.test(ua) ? "iPhone" : /Android/.test(ua) ? "Android" : /Mac/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : "altro";
+  return `${so}${eInstallata() ? " · app installata" : " · browser"}`;
+}
+
+async function attivaNotifiche() {
+  const p = ui.push || {};
+  ui.push = { ...p, inCorso: true, errore: "" }; render();
+  try {
+    if (!sync.utenteCollegato()) throw new Error("Collega prima l'account.");
+    const chiave = await conTimeout(sync.chiavePubblicaNotifiche(), 15000, "La funzione 'notifiche' non risponde: va pubblicata su Supabase (vedi README).");
+    const permesso = await Notification.requestPermission();
+    if (permesso !== "granted") throw new Error(permesso === "denied" ? "Notifiche bloccate: riattivale nelle impostazioni del telefono per questa app." : "Permesso non concesso.");
+    const reg = await registrazioneSW(8000);
+    if (!reg) throw new Error("Il service worker non è pronto: ricarica l'app e riprova.");
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64aBytes(chiave) });
+    await sync.salvaAbbonamento(sub, descrizioneDispositivo());
+    const imp = store.impostazioni();
+    store.aggiornaImpostazioni({ notifiche: { ...NOTIFICHE_DEFAULT, ...(imp.notifiche || {}), fuso: Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Rome" } });
+    avvisa("Notifiche attive su questo dispositivo. Prova con «Invia una notifica di prova».");
+  } catch (err) {
+    ui.push = { ...(ui.push || {}), errore: err.message || String(err) };
+  } finally {
+    calcolaStatoPush();
+  }
+}
+
+async function disattivaNotifiche() {
+  ui.push = { ...(ui.push || {}), inCorso: true, errore: "" }; render();
+  try {
+    const reg = await registrazioneSW();
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    const endpoint = sub?.endpoint;
+    if (sub) await sub.unsubscribe();
+    if (endpoint) await sync.rimuoviAbbonamento(endpoint).catch(() => {});
+    avvisa("Notifiche disattivate su questo dispositivo.");
+  } catch (err) {
+    ui.push = { ...(ui.push || {}), errore: err.message || String(err) };
+  } finally {
+    calcolaStatoPush();
+  }
+}
+
+async function provaNotifica() {
+  ui.push = { ...(ui.push || {}), inCorso: true, errore: "" }; render();
+  try {
+    const r = await conTimeout(sync.inviaNotificaProva(), 20000, "La funzione non ha risposto in tempo.");
+    avvisa(`Notifica di prova inviata a ${r?.dispositivi || 1} ${r?.dispositivi === 1 ? "dispositivo" : "dispositivi"}. Dovrebbe arrivare tra pochi secondi.`);
+  } catch (err) {
+    ui.push = { ...(ui.push || {}), errore: err.message || String(err) };
+  } finally {
+    calcolaStatoPush();
+  }
 }
 
 function pillSync() {
@@ -488,6 +593,41 @@ function vistaImpostazioni() {
   }
   html += `</div></section>`;
 
+  // --- notifiche
+  const notif = { ...NOTIFICHE_DEFAULT, ...(imp.notifiche || {}) };
+  if (ui.vista === "impostazioni" && !ui.push && s.utente) calcolaStatoPush();
+  const push = ui.push;
+  html += `<section class="sezione"><div class="intestazione"><h2>Notifiche</h2></div><div class="carta">`;
+  if (!sync.configurato()) {
+    html += `<div class="voce" style="display:block"><div class="t">Serve la sincronizzazione</div><div class="d">Le notifiche partono dal server: configura prima Supabase (vedi README).</div></div>`;
+  } else if (!s.utente) {
+    html += `<div class="voce" style="display:block"><div class="t">Collega prima l'account</div><div class="d">Le notifiche sono legate al tuo account: accedi qui sopra, poi torna qui per attivarle.</div></div>`;
+  } else if (!push) {
+    html += `<div class="voce" style="display:block"><div class="t">Controllo lo stato…</div></div>`;
+  } else if (push.supporto === "ios-browser") {
+    html += `<div class="voce" style="display:block"><div class="t">Su iPhone servono dall'app installata</div><div class="d">Safari non può ricevere notifiche: aggiungi l'app alla schermata Home, aprila da lì e attivale in questa stessa pagina.</div></div>`;
+  } else if (push.supporto === "no") {
+    html += `<div class="voce" style="display:block"><div class="t">Non supportate qui</div><div class="d">Questo browser non supporta le notifiche push.</div></div>`;
+  } else if (push.permesso === "denied") {
+    html += `<div class="voce" style="display:block"><div class="t">Notifiche bloccate</div><div class="d">Le hai negate in passato. Riattivale nelle impostazioni del telefono (o del browser) per questa app, poi torna qui.</div></div>`;
+  } else if (push.attive) {
+    html += `<div class="voce"><div><div class="t">Attive su questo dispositivo</div><div class="d">Riceverai il riepilogo del mattino, i promemoria e gli avvisi di scadenza.</div></div>
+      <div style="display:flex;gap:8px;flex:none;flex-wrap:wrap;justify-content:flex-end"><button class="bottone-mini" data-azione="push-prova" ${push.inCorso ? "disabled" : ""}>Invia una prova</button><button class="bottone-mini" data-azione="push-disattiva" ${push.inCorso ? "disabled" : ""}>Disattiva</button></div></div>`;
+  } else {
+    html += `<div class="voce"><div><div class="t">Non attive su questo dispositivo</div><div class="d">${eIOS() ? "Ti verrà chiesto il permesso: tocca «Consenti»." : "Il browser ti chiederà il permesso."}</div></div>
+      <button class="bottone-mini" data-azione="push-attiva" ${push.inCorso ? "disabled" : ""}>${push.inCorso ? "Attivo…" : "Attiva"}</button></div>`;
+  }
+  if (push?.errore) html += `<div class="voce" style="display:block"><div class="avviso ko">${h(push.errore)}</div></div>`;
+  html += `
+    <div class="voce"><div><div class="t">Riepilogo del mattino</div><div class="d">Gli impegni di oggi e la frase del giorno.</div></div>
+      <div style="display:flex;gap:10px;align-items:center;flex:none"><input type="time" data-campo-notifica="oraMattino" value="${h(notif.oraMattino)}" ${notif.mattino ? "" : "disabled"}>${interruttore("mattino", notif.mattino).replace('data-azione="toggle"', 'data-azione="toggle-notifica"')}</div></div>
+    <div class="voce"><div><div class="t">Promemoria all'ora dell'impegno</div><div class="d">Per gli impegni con un orario, con l'anticipo che scegli.</div></div>
+      <div style="display:flex;gap:10px;align-items:center;flex:none"><select data-campo-notifica="anticipo" ${notif.promemoria ? "" : "disabled"}>${[0, 5, 10, 15, 30, 60].map((m) => `<option value="${m}" ${Number(notif.anticipo) === m ? "selected" : ""}>${m === 0 ? "all'ora" : m + " min prima"}</option>`).join("")}</select>${interruttore("promemoria", notif.promemoria).replace('data-azione="toggle"', 'data-azione="toggle-notifica"')}</div></div>
+    <div class="voce"><div><div class="t">Scadenze: ultimo giorno</div><div class="d">Un avviso se una scadenza non è ancora fatta.</div></div>
+      <div style="display:flex;gap:10px;align-items:center;flex:none"><input type="time" data-campo-notifica="oraScadenze" value="${h(notif.oraScadenze)}" ${notif.scadenze ? "" : "disabled"}>${interruttore("scadenze", notif.scadenze).replace('data-azione="toggle"', 'data-azione="toggle-notifica"')}</div></div>
+    <p class="muto piccolo" style="padding:10px 16px 14px">Orari nel fuso ${h(notif.fuso)}. Le preferenze valgono per tutti i dispositivi collegati; l'attivazione va fatta su ciascuno.</p>
+  </div></section>`;
+
   // --- preferenze
   html += `<section class="sezione"><div class="intestazione"><h2>Preferenze</h2></div><div class="carta">
     <div class="voce"><div><div class="t">Modalità concentrazione</div><div class="d">In Oggi vedi un impegno alla volta.</div></div>${interruttore("modalitaFocus", imp.modalitaFocus)}</div>
@@ -538,7 +678,7 @@ function vistaImpostazioni() {
     <div class="voce"><div><div class="t">Importa</div><div class="d">Carica un file esportato in precedenza. Si somma a quello che c'è.</div></div><label class="bottone-mini" style="cursor:pointer">Scegli file<input type="file" accept="application/json,.json" id="file-importa" hidden></label></div>
     <div class="voce"><div><div class="t">Cancella tutto</div><div class="d">Svuota i dati su questo dispositivo.</div></div><button class="bottone-mini" style="color:var(--alta)" data-azione="cancella-tutto">Cancella</button></div>
   </div></section>
-  <p class="muto piccolo" style="margin-top:22px;text-align:center">Impegni ${VERSIONE_APP} · ${eInstallata() ? "app installata" : "nel browser"} · sync: ${h(sync.statoSync.stato)}${sync.statoSync.messaggio ? " (" + h(sync.statoSync.messaggio) + ")" : ""}</p>`;
+  <p class="muto piccolo" id="diagnostica" style="margin-top:22px;text-align:center">Impegni ${VERSIONE_APP} · ${eInstallata() ? "app installata" : "nel browser"} · sync: ${h(sync.statoSync.stato)}${sync.statoSync.messaggio ? " (" + h(sync.statoSync.messaggio) + ")" : ""}</p>`;
   return html;
 }
 
@@ -572,12 +712,21 @@ function gestisciClick(e) {
     case "agenda-fatti": ui.agendaFatti = !ui.agendaFatti; return render();
     case "toggle": { const k = el.dataset.chiave; store.aggiornaImpostazioni({ [k]: !store.impostazioni()[k] }); return; }
     case "sync-ora": return sync.sincronizza();
-    case "esci": ui.login = { ...ui.login, errore: "", ok: "", offriRegistrazione: false }; return sync.esci().then(() => avvisa("Sei uscito. I dati restano qui."));
+    case "esci": ui.login = { ...ui.login, errore: "", ok: "", offriRegistrazione: false }; ui.push = null; return sync.esci().then(() => avvisa("Sei uscito. I dati restano qui."));
     case "login-reset": ui.login = { ...ui.login, inviato: false, errore: "", inCorso: false, ok: "" }; return render();
     case "login-mostra-link": ui.login.mostraLink = !ui.login.mostraLink; ui.login.errore = ""; ui.login.ok = ""; render(); return $("#login-email")?.focus();
     case "registra": return registra();
     case "password-dimenticata": return passwordDimenticata();
     case "installa": return ui.installPrompt?.prompt().then(() => { ui.installPrompt = null; render(); });
+    case "push-attiva": return attivaNotifiche();
+    case "push-disattiva": return disattivaNotifiche();
+    case "push-prova": return provaNotifica();
+    case "toggle-notifica": {
+      const k = el.dataset.chiave;
+      const notif = { ...NOTIFICHE_DEFAULT, ...(store.impostazioni().notifiche || {}) };
+      store.aggiornaImpostazioni({ notifiche: { ...notif, [k]: !notif[k], fuso: Intl.DateTimeFormat().resolvedOptions().timeZone || notif.fuso } });
+      return;
+    }
     case "esporta": return esporta();
     case "cancella-tutto":
       if (confirm("Cancellare tutti i dati su questo dispositivo? Se sei collegato, al prossimo accesso tornano dal server.")) { store.cancellaTutto(); avvisa("Tutto cancellato. Tabula rasa."); }
@@ -593,6 +742,12 @@ function gestisciChange(e) {
   if (t.matches("[data-campo-impostazione]")) {
     const k = t.dataset.campoImpostazione;
     store.aggiornaImpostazioni({ [k]: t.type === "number" || k === "oraChiusura" ? Number(t.value) : t.value.trim() });
+  } else if (t.matches("[data-campo-notifica]")) {
+    const k = t.dataset.campoNotifica;
+    const notif = { ...NOTIFICHE_DEFAULT, ...(store.impostazioni().notifiche || {}) };
+    const valore = k === "anticipo" ? Number(t.value) : t.value;
+    if (k !== "anticipo" && !/^\d{2}:\d{2}$/.test(valore)) return;
+    store.aggiornaImpostazioni({ notifiche: { ...notif, [k]: valore, fuso: Intl.DateTimeFormat().resolvedOptions().timeZone || notif.fuso } });
   } else if (t.matches("[data-campo-tema]")) {
     applicaTema(t.value);
   } else if (t.id === "file-importa" && t.files[0]) {

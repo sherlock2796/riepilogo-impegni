@@ -156,6 +156,49 @@ export async function esci() {
   store.aggiornaInfoSync({ utenteId: null, ultimaSyncImpegni: null, ultimaSyncChiusure: null, ultimaSyncImpostazioni: null });
 }
 
+// ------------------------------- notifiche push -------------------------------
+
+export function utenteCollegato() { return !!(client && utente); }
+
+export async function salvaAbbonamento(sub, dispositivo = "") {
+  if (!client || !utente) throw new Error("Collega prima l'account.");
+  const j = typeof sub.toJSON === "function" ? sub.toJSON() : sub;
+  const { error } = await client.from("push_abbonamenti").upsert({
+    user_id: utente.id, endpoint: j.endpoint, p256dh: j.keys?.p256dh, auth: j.keys?.auth,
+    dispositivo: String(dispositivo).slice(0, 120), aggiornato_il: new Date().toISOString(),
+  }, { onConflict: "endpoint" });
+  if (error) throw new Error(traduci(error.message));
+}
+
+export async function rimuoviAbbonamento(endpoint) {
+  if (!client || !utente || !endpoint) return;
+  const { error } = await client.from("push_abbonamenti").delete().eq("endpoint", endpoint);
+  if (error) throw new Error(traduci(error.message));
+}
+
+/** Chiave pubblica VAPID: da config.js se compilata, altrimenti dalla Edge Function. */
+export async function chiavePubblicaNotifiche() {
+  if (globalThis.CONFIG?.vapidPublicKey) return CONFIG.vapidPublicKey;
+  if (!client) throw new Error("Sincronizzazione non disponibile: controlla la connessione.");
+  const { data, error } = await client.functions.invoke("notifiche", { body: { chiavePubblica: true } });
+  if (error) throw new Error(traduci(error.message || "Funzione non raggiungibile"));
+  if (!data?.chiave) throw new Error("La funzione non ha la chiave VAPID_PUBLIC_KEY nei secrets (vedi README).");
+  return data.chiave;
+}
+
+/** Chiede alla Edge Function di mandare una notifica di prova a questo account. */
+export async function inviaNotificaProva() {
+  if (!client || !utente) throw new Error("Collega prima l'account.");
+  const { data, error } = await client.functions.invoke("notifiche", { body: { prova: true } });
+  if (error) {
+    let dettaglio = "";
+    try { dettaglio = (await error.context?.json())?.errore || ""; } catch { /* niente */ }
+    throw new Error(dettaglio ? traduci(dettaglio) : traduci(error.message || "Funzione non raggiungibile"));
+  }
+  if (data?.errore) throw new Error(traduci(data.errore));
+  return data;
+}
+
 // ------------------------------- password ------------------------------------
 // L'accesso con password funziona ovunque, anche nell'app installata su iPhone
 // (dove il link via email non può arrivare). La password si imposta da collegati.
@@ -203,6 +246,10 @@ function traduci(msg = "") {
   if (m.includes("expired") || m.includes("otp_expired")) return "Link scaduto o già usato: richiedine uno nuovo.";
   if (m.includes("already used") || m.includes("refresh token")) return "Sessione non più valida: accedi di nuovo.";
   if (m.includes("invalid email")) return "Indirizzo email non valido.";
+  if (m.includes("push_abbonamenti") || m.includes("notifiche_inviate")) return "Tabelle delle notifiche mancanti: esegui supabase/aggiornamento-4.sql (vedi README).";
+  if (m.includes("failed to send a request to the edge function") || m.includes("edge function")) return "La funzione 'notifiche' non risponde: va pubblicata su Supabase (vedi README, sezione Notifiche).";
+  if (m.includes("nessun dispositivo")) return "Nessun dispositivo registrato: attiva prima le notifiche qui sopra.";
+  if (m.includes("vapid")) return "Mancano le chiavi VAPID nei secrets della funzione (vedi README).";
   if (m.includes("permission denied")) return "Permessi mancanti sul database: esegui supabase/aggiornamento-2.sql su Supabase (vedi README).";
   if (m.includes("scadenza")) return "Il database va aggiornato per le scadenze: esegui supabase/aggiornamento-3.sql (vedi README).";
   if (m.includes("sincronizzato_il")) return "Il database Supabase va aggiornato: esegui supabase/aggiornamento-1.sql (vedi README).";

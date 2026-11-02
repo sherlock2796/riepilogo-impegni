@@ -406,7 +406,8 @@ main {
 .interruttore::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .3); transition: transform .15s; }
 .interruttore.on { background: var(--salvia); }
 .interruttore.on::after { transform: translateX(20px); }
-.voce select { max-width: 120px; padding: 8px 10px; border-radius: 10px; border: 1.5px solid var(--linea); background: var(--carta); }
+.voce select, .voce input[type="time"] { max-width: 130px; padding: 8px 10px; border-radius: 10px; border: 1.5px solid var(--linea); background: var(--carta); color: var(--inchiostro); font: inherit; }
+.voce input[type="time"]:disabled, .voce select:disabled { opacity: .45; }
 .frase-voce { display: flex; gap: 10px; align-items: flex-start; padding: 10px 16px; border-bottom: 1px solid var(--linea); font-size: 15px; }
 .frase-voce:last-child { border-bottom: 0; }
 .frase-voce.nascosta { color: var(--testo-3); text-decoration: line-through; }

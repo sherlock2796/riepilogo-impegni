@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chiavi notifiche</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="style.css">
+<style>
+  main { max-width: 640px; }
+  .chiave { font-family: ui-monospace, Menlo, monospace; font-size: 13px; word-break: break-all; background: var(--carta-2); padding: 12px 14px; border-radius: 12px; margin-top: 8px; }
+  .passo { margin-top: 22px; }
+</style>
+</head>
+<body>
+<div class="app"><main>
+  <header class="testata"><div><div class="sopra">Impegni · strumenti</div><h1>Chiavi per le notifiche</h1>
+    <p class="muto" style="margin-top:8px">Le notifiche push vanno firmate con una coppia di chiavi (VAPID). Questa pagina le genera qui, nel tuo browser: niente passa da nessun server. La chiave privata va <b>solo</b> nei secrets della funzione su Supabase.</p></div></header>
+
+  <div class="carta" style="padding:18px">
+    <button class="bottone" id="genera">Genera una coppia di chiavi</button>
+    <div id="risultato" hidden>
+      <div class="passo"><span class="lab" style="display:block;font-size:12.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--testo-3)">VAPID_PUBLIC_KEY</span><div class="chiave" id="pub"></div><button class="bottone-mini" style="margin-top:8px" data-copia="pub">Copia</button></div>
+      <div class="passo"><span class="lab" style="display:block;font-size:12.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--testo-3)">VAPID_PRIVATE_KEY</span><div class="chiave" id="priv"></div><button class="bottone-mini" style="margin-top:8px" data-copia="priv">Copia</button></div>
+      <div class="passo"><span class="lab" style="display:block;font-size:12.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--testo-3)">VAPID_SUBJECT</span><div class="chiave" id="subj">mailto:la-tua-email@esempio.it</div><p class="muto piccolo" style="margin-top:6px">Scrivi la tua email al posto di quella di esempio.</p></div>
+      <div class="avviso" style="margin-top:22px">Incolla i tre valori in Supabase → Edge Functions → Secrets, con questi nomi esatti. Poi chiudi questa pagina: le chiavi non vengono salvate da nessuna parte, se le perdi ne generi una coppia nuova e aggiorni i secrets.</div>
+    </div>
+  </div>
+  <p class="muto piccolo" style="margin-top:18px"><a class="link" href="./">← Torna all'app</a></p>
+</main></div>
+<div id="toast" role="status"></div>
+<script>
+(function () {
+  const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const daB64url = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - s.length % 4) % 4)), (c) => c.charCodeAt(0));
+  const toast = document.getElementById("toast");
+  let timer;
+  const avvisa = (t) => { toast.textContent = t; toast.className = "visibile"; clearTimeout(timer); timer = setTimeout(() => { toast.className = ""; }, 2200); };
+
+  document.getElementById("genera").addEventListener("click", async () => {
+    try {
+      const coppia = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+      const pub = await crypto.subtle.exportKey("jwk", coppia.publicKey);
+      const priv = await crypto.subtle.exportKey("jwk", coppia.privateKey);
+      const punto = new Uint8Array(65);
+      punto[0] = 4; punto.set(daB64url(pub.x), 1); punto.set(daB64url(pub.y), 33);
+      document.getElementById("pub").textContent = b64url(punto.buffer);
+      document.getElementById("priv").textContent = priv.d;
+      document.getElementById("risultato").hidden = false;
+      document.getElementById("genera").textContent = "Genera un'altra coppia";
+    } catch (e) {
+      avvisa("Questo browser non riesce a generare le chiavi: prova con Safari o Chrome aggiornati.");
+    }
+  });
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-copia]");
+    if (!b) return;
+    const testo = document.getElementById(b.dataset.copia).textContent;
+    (navigator.clipboard ? navigator.clipboard.writeText(testo) : Promise.reject()).then(() => avvisa("Copiato.")).catch(() => avvisa("Seleziona il testo e copialo a mano."));
+  });
+})();
+</script>
+</body>
+</html>

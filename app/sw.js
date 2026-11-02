@@ -3,7 +3,7 @@
 // le richieste alla stessa origine vengono servite dalla cache e aggiornate
 // in sottofondo. Le chiamate verso Supabase e i font passano dritte.
 
-const VERSIONE = "impegni-v1.1.1";
+const VERSIONE = "impegni-v1.2.0";
 const CACHE_ESTERNI = "impegni-esterni-v1";
 // Libreria di sincronizzazione e caratteri: messi in cache al primo uso,
 // così l'app parte anche offline (e la libreria non manca mai).
@@ -21,6 +21,7 @@ const FILE = [
   "./js/frasi.js",
   "./js/ricorrenze.js",
   "./js/date.js",
+  "./js/notifiche-logica.js",
   "./icons/icon.svg",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -91,4 +92,30 @@ self.addEventListener("fetch", (e) => {
       return inCache || rete;
     })
   );
+});
+
+// ----------------------------- notifiche push --------------------------------
+self.addEventListener("push", (e) => {
+  let dati = {};
+  try { dati = e.data ? e.data.json() : {}; } catch { dati = { corpo: e.data ? e.data.text() : "" }; }
+  const titolo = dati.titolo || "Impegni";
+  e.waitUntil(self.registration.showNotification(titolo, {
+    body: dati.corpo || "",
+    icon: "./icons/icon-192.png",
+    badge: "./icons/icon-192.png",
+    tag: dati.tag || undefined,
+    data: { url: dati.url || "./#/oggi" },
+  }));
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const destinazione = new URL(e.notification.data?.url || "./#/oggi", self.registration.scope).href;
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((finestre) => {
+    const aperta = finestre.find((w) => w.url.startsWith(self.registration.scope));
+    if (aperta) {
+      return aperta.focus().then(() => (aperta.navigate ? aperta.navigate(destinazione).catch(() => null) : null));
+    }
+    return self.clients.openWindow(destinazione);
+  }));
 });
