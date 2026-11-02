@@ -54,12 +54,24 @@ export function carica() {
       stato.impostazioni = { ...IMPOSTAZIONI_DEFAULT, ...(s.impostazioni || {}) };
       stato.sync = { ...statoVuoto().sync, ...(s.sync || {}) };
       pulisciEliminati();
+      migra();
     }
   } catch (e) {
     console.warn("Archivio locale illeggibile, riparto da zero", e);
     stato = statoVuoto();
   }
   return stato;
+}
+
+/** Adeguamenti una tantum dei dati salvati da versioni precedenti. */
+function migra() {
+  const v = stato.versioneDati || 1;
+  if (v < 2) {
+    // 1.1.0 poteva aver spedito le scadenze senza contrassegno (colonna mancante sul server):
+    // alla prossima sincronizzazione con la colonna presente vanno rispedite.
+    if (Object.values(stato.impegni).some((i) => i.scadenza && !i.eliminato)) stato.sync.rispedisciScadenze = true;
+  }
+  stato.versioneDati = 2;
 }
 
 /** Dimentica gli impegni eliminati da più di 60 giorni e già sincronizzati. */
@@ -363,6 +375,20 @@ export function segnaSincronizzati({ impegni = [], chiusure = [], impostazioni =
   stato.sync.pendingChiusure = stato.sync.pendingChiusure.filter((d) => !chiusure.includes(d));
   if (impostazioni) stato.sync.pendingImpostazioni = false;
   salva();
+}
+
+/** Rinfresca aggiornato_il degli impegni a scadenza e li rimette in coda: così gli altri dispositivi accettano il contrassegno. */
+export function toccaScadenze() {
+  const adesso = adessoISO();
+  const ids = [];
+  for (const i of Object.values(stato.impegni)) {
+    if (!i.scadenza || i.eliminato) continue;
+    i.aggiornato_il = adesso;
+    segnaPending(i.id);
+    ids.push(i.id);
+  }
+  salva();
+  return ids;
 }
 
 /** Marca tutto come da spingere (primo accesso con dati locali già presenti). */

@@ -274,3 +274,15 @@ test("agenda: raggruppata per giorno da oggi in poi, con o senza fatti", () => {
   g = store.agenda(OGGI, { conFatti: true });
   assert.deepEqual(g[0].impegni.map((i) => i.titolo), ["Oggi", "Oggi fatto"]);
 });
+
+test("toccaScadenze rinfresca il timestamp e rimette in coda solo le scadenze", async () => {
+  const s = store.crea({ titolo: "Scadenza", data: aggiungiGiorni(OGGI, 2), scadenza: true });
+  const n = store.crea({ titolo: "Normale", data: OGGI });
+  store.segnaSincronizzati({ impegni: [s.id, n.id] });
+  const prima = store.perId(s.id).aggiornato_il;
+  await dormi(3);
+  const ids = store.toccaScadenze();
+  assert.deepEqual(ids, [s.id]);
+  assert.ok(store.perId(s.id).aggiornato_il > prima);
+  assert.deepEqual(store.pendenti().impegni.map((i) => i.id), [s.id]);
+});

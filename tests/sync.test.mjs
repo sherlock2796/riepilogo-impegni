@@ -336,15 +336,52 @@ test("scadenze: il contrassegno viaggia; senza colonna il resto si sincronizza e
   await accedi(dispositivi.S2.client, "s@test.it");
   assert.equal(store.perId(s.id).scadenza, true);
 
-  // database non aggiornato
+  // database non aggiornato: la riga parte senza contrassegno, ma resta in coda
   server.stato.colonnaScadenza = false;
-  store.crea({ titolo: "Altro", data: OGGI, scadenza: true });
+  const altro = store.crea({ titolo: "Altro", data: aggiungiGiorni(OGGI, 2), scadenza: true });
+  store.crea({ titolo: "Normale", data: OGGI });
   await sync.sincronizza();
   assert.equal(sync.statoSync.stato, "collegato", "la sincronizzazione non si blocca");
   assert.match(sync.statoSync.messaggio, /aggiornamento-3\.sql/);
-  assert.equal(server.tabelle.impegni.size, 2, "la riga è arrivata comunque, senza il contrassegno");
-  assert.equal(store.pendenti().impegni.length, 0);
+  assert.equal(server.tabelle.impegni.size, 3, "le righe sono arrivate comunque");
+  assert.equal(server.tabelle.impegni.get(altro.id).scadenza, undefined);
+  assert.deepEqual(store.pendenti().impegni.map((i) => i.titolo), ["Altro"], "solo la scadenza resta da rispedire");
+  assert.equal(store.infoSync().rispedisciScadenze, true);
+
+  // un altro dispositivo intanto la riceve come impegno normale
+  await usaDispositivo("S1", server);
+  assert.equal(store.perId(altro.id).scadenza, false);
+  const vecchioTs = store.perId(altro.id).aggiornato_il;
+
+  // la colonna viene aggiunta: il dispositivo che l'aveva creata la rispedisce con timestamp nuovo
   server.stato.colonnaScadenza = true;
+  await usaDispositivo("S2", server);
   await sync.sincronizza();
   assert.equal(sync.statoSync.messaggio, "");
+  assert.equal(store.infoSync().rispedisciScadenze, false);
+  assert.equal(store.pendenti().impegni.length, 0);
+  assert.equal(server.tabelle.impegni.get(altro.id).scadenza, true);
+  assert.ok(server.tabelle.impegni.get(altro.id).aggiornato_il > vecchioTs, "aggiornato_il rinfrescato");
+
+  // ...e l'altro dispositivo ora accetta il contrassegno
+  await usaDispositivo("S1", server);
+  assert.equal(store.perId(altro.id).scadenza, true);
+});
+
+test("migrazione da 1.1.0: le scadenze locali vengono rispedite appena la colonna esiste", async () => {
+  const server = creaServer();
+  const A = await usaDispositivo("M1", server);
+  await accedi(A, "m@test.it");
+  const s = store.crea({ titolo: "Vecchia", data: aggiungiGiorni(OGGI, 3), scadenza: true });
+  await sync.sincronizza();
+  // simulo il server rimasto senza contrassegno e l'archivio salvato dalla 1.1.0
+  server.tabelle.impegni.get(s.id).scadenza = undefined;
+  const salvato = JSON.parse(localStorage.getItem("impegni.v1"));
+  delete salvato.versioneDati;
+  localStorage.setItem("impegni.v1", JSON.stringify(salvato));
+  store.carica();
+  assert.equal(store.infoSync().rispedisciScadenze, true, "la migrazione segna le scadenze da rispedire");
+  await sync.sincronizza();
+  assert.equal(server.tabelle.impegni.get(s.id).scadenza, true);
+  assert.equal(store.infoSync().rispedisciScadenze, false);
 });

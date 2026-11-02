@@ -284,18 +284,44 @@ async function pull() {
   store.aggiornaInfoSync({ ultimaSyncImpegni: imp.segnalibro, ultimaSyncChiusure: chi.segnalibro });
 }
 
+const AVVISO_SCADENZE = "Il database va aggiornato per le scadenze: esegui supabase/aggiornamento-3.sql (vedi README).";
+
 async function push() {
   const p = store.pendenti();
+  let degradato = false;
   if (p.impegni.length) {
     const righe = p.impegni.map((i) => aRigaImpegno(i, utente.id));
     let { error } = await client.from("impegni").upsert(righe, { onConflict: "id" });
     if (error && /scadenza/i.test(error.message || "")) {
-      // Database non ancora aggiornato: sincronizzo tutto il resto e avviso.
-      avvisoSchema = "Il database va aggiornato per le scadenze: esegui supabase/aggiornamento-3.sql (vedi README).";
+      // Database non ancora aggiornato: spedisco tutto senza il contrassegno e avviso.
+      degradato = true;
+      avvisoSchema = AVVISO_SCADENZE;
+      store.aggiornaInfoSync({ rispedisciScadenze: true });
       ({ error } = await client.from("impegni").upsert(righe.map(({ scadenza, ...r }) => r), { onConflict: "id" }));
     }
     if (error) throw error;
-    store.segnaSincronizzati({ impegni: p.impegni.map((i) => i.id) });
+    // Gli impegni a scadenza spediti senza contrassegno restano in coda: partiranno completi quando la colonna ci sarà.
+    const completati = degradato ? p.impegni.filter((i) => !i.scadenza) : p.impegni;
+    store.segnaSincronizzati({ impegni: completati.map((i) => i.id) });
+  }
+  if (store.infoSync().rispedisciScadenze && !degradato) {
+    // Verifico che la colonna esista davvero (se non c'era niente da spingere, non l'ho ancora provato).
+    const sonda = p.impegni.length ? { error: null } : await client.from("impegni").select("scadenza").limit(1);
+    if (sonda.error && /scadenza/i.test(sonda.error.message || "")) {
+      avvisoSchema = AVVISO_SCADENZE;
+    } else if (sonda.error) {
+      throw sonda.error;
+    } else {
+      // La colonna ora c'è: rispedisco le scadenze con un timestamp nuovo, così gli altri dispositivi le accettano.
+      const ids = store.toccaScadenze();
+      if (ids.length) {
+        const righe = store.pendenti().impegni.filter((i) => ids.includes(i.id)).map((i) => aRigaImpegno(i, utente.id));
+        const { error } = await client.from("impegni").upsert(righe, { onConflict: "id" });
+        if (error) throw error;
+        store.segnaSincronizzati({ impegni: ids });
+      }
+      store.aggiornaInfoSync({ rispedisciScadenze: false });
+    }
   }
   if (p.chiusure.length) {
     const righe = p.chiusure.map((c) => aRigaChiusura(c, utente.id));
