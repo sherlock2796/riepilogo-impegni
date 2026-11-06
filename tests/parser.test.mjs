@@ -191,3 +191,11 @@ test("scadenze: 'entro' e sinonimi rendono la data un limite", () => {
   assert.equal(r.scadenza, false, "'entrare' non è 'entro'");
   assert.equal(r.titolo, "Entrare in casa");
 });
+
+test("giorni della settimana elencati senza virgole", () => {
+  const r = analizza("palestra ogni lunedì mercoledì e venerdì alle 17:30", OGGI);
+  assert.deepEqual(r.ricorrenza, { tipo: "settimane", ogni: 1, giorniSettimana: [0, 2, 4] });
+  assert.equal(r.titolo, "Palestra");
+  assert.equal(r.ora, "17:30");
+  assert.equal(r.data, "2026-10-05");
+});

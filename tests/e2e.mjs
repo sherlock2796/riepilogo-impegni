@@ -179,6 +179,20 @@ const idPerTitolo = (p, t) => p.$eval(`#vista .riga:has(.titolo:text-is("${t}"))
   controlla("modifica: spostata a domani con nuovo titolo", (await titoli(p, "#sezione-domani")).includes("Spesa grossa"));
   controlla("modifica: icona nota presente", await p.$(`#vista .riga:has(.titolo:text-is("Spesa grossa")) .meta svg`) !== null);
 
+  // --- rimandare un ricorrente "in certi giorni" rispetta la data scelta
+  await aggiungi(p, "yoga ogni sabato e martedì alle 8", { dataAttesa: "2026-10-03", oraAttesa: "08:00" });
+  await p.click(`#vista .riga:has(.titolo:text-is("Yoga")) .corpo`);
+  await p.waitForSelector("#form-impegno");
+  await p.click(".chip[data-rimanda='1']");
+  await p.click("#form-impegno button[type=submit]");
+  await p.waitForSelector("#sheet", { state: "hidden" });
+  controlla("ricorrente rimandato a domani: finisce davvero domani", (await titoli(p, "#sezione-domani")).includes("Yoga"));
+  controlla("ricorrente rimandato: il toast dice dove", /spostato a domani/.test(await p.textContent("#toast")));
+  await p.click(`#sezione-domani .riga:has(.titolo:text-is("Yoga")) .corpo`);
+  await p.waitForSelector("[data-elimina]");
+  await p.click("[data-elimina]");
+  await p.waitForSelector("#sheet", { state: "hidden" });
+
   // --- eliminazione (dialog accettato automaticamente)
   await p.click(`#vista .riga:has(.titolo:text-is("Stretching")) .corpo`);
   await p.waitForSelector("[data-elimina]");

@@ -69,7 +69,7 @@ export function analizza(testo, oggi = oggiISO()) {
 
   // --- ricorrenze -----------------------------------------------------------
   let m;
-  if ((m = prendi(new RegExp(`\\b(?:ogni|tutti i|tutte le)\\s+((?:${G})(?:\\s*(?:,|e)\\s*(?:${G}))*)\\b`)))) {
+  if ((m = prendi(new RegExp(`\\b(?:ogni|tutti i|tutte le)\\s+((?:${G})(?:(?:\\s*,\\s*|\\s+e\\s+|\\s+)(?:${G}))*)\\b`)))) {
     const giorni = [...m[1].matchAll(new RegExp(G, "g"))].map((x) => GIORNI_NOME[x[0]]);
     ricorrenza = { tipo: "settimane", ogni: 1, giorniSettimana: [...new Set(giorni)].sort() };
   } else if ((m = prendi(/\b(?:ogni giorno|tutti i giorni|ogni mattina|ogni sera|giornalmente|quotidianamente)\b/))) {

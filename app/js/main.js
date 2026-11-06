@@ -8,7 +8,7 @@ import { scegliFrase, saluto, BASE, MOMENTI } from "./frasi.js";
 import { descrivi as descriviRicorrenza, allineaData } from "./ricorrenze.js";
 import * as D from "./date.js";
 
-const VERSIONE_APP = "1.2.3";
+const VERSIONE_APP = "1.2.4";
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const h = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -1039,6 +1039,7 @@ function apriFormImpegno({ impegno = null, dataIniziale = ui.oggi } = {}) {
     if (chip.dataset.g !== undefined) { chip.classList.toggle("attivo"); toccati.add("ricorrenza"); return; }
     if (chip.dataset.rimanda) {
       const dataInput = $("#f-data", form);
+      toccati.add("data");
       if (chip.dataset.rimanda === "scegli") { dataInput.focus(); dataInput.showPicker?.(); return; }
       dataInput.value = D.aggiungiGiorni(ui.oggi, Number(chip.dataset.rimanda));
       return;
@@ -1106,7 +1107,9 @@ function apriFormImpegno({ impegno = null, dataIniziale = ui.oggi } = {}) {
       }
     }
     let data = $("#f-data", form).value || ui.oggi;
-    if (ricorrenza) data = allineaData(data, ricorrenza) || data;
+    // Il riallineamento ai giorni della ricorrenza vale solo per un impegno nuovo
+    // di cui non è stata scelta la data: una data scelta a mano (anche "Rimanda") resta quella.
+    if (ricorrenza && nuovo && !toccati.has("data")) data = allineaData(data, ricorrenza) || data;
     const campi = {
       titolo: $("#f-titolo", form).value,
       data,
@@ -1122,8 +1125,9 @@ function apriFormImpegno({ impegno = null, dataIniziale = ui.oggi } = {}) {
       store.crea(campi);
       avvisa(campi.scadenza ? `Aggiunto, da fare entro ${D.etichettaRelativa(data, ui.oggi).toLowerCase()}.` : `Aggiunto per ${D.etichettaRelativa(data, ui.oggi).toLowerCase()}${campi.ora ? " alle " + campi.ora : ""}.`);
     } else {
+      const dataPrima = impegno.data;
       store.aggiorna(impegno.id, campi);
-      avvisa("Salvato.");
+      avvisa(data !== dataPrima ? `Salvato: spostato a ${D.etichettaRelativa(data, ui.oggi).toLowerCase()}.` : "Salvato.");
     }
     chiudiSheet();
   });
